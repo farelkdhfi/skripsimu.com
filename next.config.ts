@@ -12,7 +12,7 @@ const nextConfig: NextConfig = {
       },
     },
   },
-  serverExternalPackages: ["pptxgenjs", "mammoth"]
+  serverExternalPackages: ["mammoth"]
 };
 
 export default nextConfig;

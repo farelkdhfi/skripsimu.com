@@ -4,7 +4,7 @@ import { parseUpload } from "@/features/file-upload/services/parse-upload";
 import { formatConfigSchema } from "@/features/thesis-formatter/schemas/format-config";
 import { formatThesis } from "@/features/thesis-formatter/services/formatter.service";
 
-export const maxDuration = 120;
+export const maxDuration = 180;
 
 export async function POST(req: Request) {
   try {

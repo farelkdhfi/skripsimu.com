@@ -2,7 +2,9 @@ import { askJson } from "@/features/ai/services/openrouter";
 import { chunkSystem, deckSystem } from "@/features/ai/prompts";
 import { extractParagraphs } from "@/features/file-upload/services/extract-text";
 import { chunkSchema, deckSchema, resolveSlideCount, type Deck, type SlidesConfig } from "../schemas/slides";
-import { chunkText, mapLimit } from "../utils/concurrency";
+import { chunkText } from "../utils/concurrency";
+import { mapLimit } from "@/lib/concurrency";
+
 
 const MAX_CHARS = 240_000, DIRECT_LIMIT = 22_000, CHUNK = 12_000;
 

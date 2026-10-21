@@ -10,11 +10,12 @@ export async function formatThesis(file: File, c: FormatConfig): Promise<FormatR
   if (paragraphs.length < 3)
     throw Object.assign(new Error("Teks dokumen tidak terbaca. Jika PDF hasil scan, gunakan DOCX atau PDF berbasis teks."), { status: 422 });
 
-  const { roles, recommendations } = await classifyParagraphs(paragraphs);
+  const { roles, recommendations, notices } = await classifyParagraphs(paragraphs);
   const { blocks, stats } = assembleBlocks(paragraphs, roles, c);
   const buf = await buildDocx(blocks, c);
 
   const validation: FormatResult["validation"] = [];
+  for (const n of notices) validation.push({ level: "warn", message: n });
   if (kind === "pdf") validation.push({ level: "warn", message: "Sumber PDF: struktur dibaca dari teks sehingga akurasi lebih rendah. Unggah DOCX untuk hasil terbaik." });
   else validation.push({ level: "warn", message: "Tabel dan gambar pada file asli belum ikut dipindahkan di versi MVP ini. Periksa dan sisipkan kembali jika ada." });
   if (stats.chapters === 0) validation.push({ level: "warn", message: "Judul bab tidak terdeteksi. Pastikan penulisan seperti 'BAB I PENDAHULUAN'." });

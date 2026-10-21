@@ -1,4 +1,4 @@
-import PptxGenJS from "pptxgenjs";
+import PptxGenJS from "pptxgenjs/dist/pptxgen.cjs.js";
 import { THEMES, type ThemeKey } from "../utils/themes";
 import type { Deck } from "../schemas/slides";
 

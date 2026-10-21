@@ -9,15 +9,22 @@ let useJsonMode = true;
 
 export async function askJson<T extends z.ZodTypeAny>(a: {
   system: string; user: string; schema: T; maxTokens?: number;
+  timeoutMs?: number; maxAttempts?: number; deadlineAt?: number;
 }): Promise<z.infer<T>> {
   const key = process.env.OPENROUTER_API_KEY;
-  if (!key) throw new AiError("OPENROUTER_API_KEY belum diatur di .env.local", 500);
+  if (!key) throw new AiError("OPENROUTER_API_KEY belum diatur di environment variable", 500);
 
+  const attempts = a.maxAttempts ?? 3;
   let lastReason = "";
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const remaining = a.deadlineAt ? a.deadlineAt - Date.now() : Infinity;
+    if (remaining < 2000) throw new AiError("Batas waktu proses AI tercapai", 504, false);
+    const timeoutMs = Math.min(a.timeoutMs ?? 90_000, remaining);
+
     try {
       const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
+        signal: AbortSignal.timeout(timeoutMs),
         headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "X-Title": "SkripsiAI" },
         body: JSON.stringify({
           model: process.env.OPENROUTER_MODEL || "openai/gpt-4o-mini",
@@ -30,7 +37,6 @@ export async function askJson<T extends z.ZodTypeAny>(a: {
 
       if (!res.ok) {
         const t = await res.text();
-        // model tidak mendukung response_format -> matikan lalu coba lagi
         if (res.status === 400 && /response_format|json_object|structured/i.test(t) && useJsonMode) {
           useJsonMode = false;
           throw new AiError("JSON mode tidak didukung model, mencoba tanpa JSON mode", 502, true);
@@ -68,9 +74,11 @@ export async function askJson<T extends z.ZodTypeAny>(a: {
       }
       return r.data;
     } catch (e) {
-      if (!(e instanceof AiError) || !e.retryable) throw e;
+      const isTimeout = e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError");
+      const err = isTimeout ? new AiError(`Request AI melebihi batas waktu ${Math.round(timeoutMs / 1000)} detik`, 504, false) : e;
+      if (!(err instanceof AiError) || !err.retryable) throw err;
       await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
     }
   }
-  throw new AiError(`AI gagal memberi output yang valid setelah 3 percobaan (${lastReason}).`);
+  throw new AiError(`AI gagal memberi output yang valid setelah ${attempts} percobaan (${lastReason}).`);
 }
