@@ -1,80 +1,171 @@
+/**
+ * Jalur REBUILD — hanya untuk sumber PDF.
+ *
+ * PDF tidak menyimpan tabel, gambar, maupun batas section sebagai struktur,
+ * jadi untuk sumber ini dokumen memang harus disusun ulang dari teks. Untuk
+ * DOCX jangan pernah memakai jalur ini: pakai `docx/transform.ts` yang
+ * menyunting dokumen asli di tempat.
+ *
+ * Aturan formatnya diambil dari lapisan `rules/` yang sama dengan jalur DOCX,
+ * supaya hasil kedua jalur tidak berbeda gaya.
+ */
+
 import {
-  AlignmentType, Document, Footer, HeadingLevel, LineRuleType, Packer, PageNumber,
-  Paragraph, TableOfContents, TextRun,
+  AlignmentType, Document, Footer, HeadingLevel, LineRuleType, NumberFormat, Packer,
+  PageNumber, Paragraph, TableOfContents, TextRun,
 } from "docx";
-import type { Block } from "../types";
 import type { FormatConfig } from "../schemas/format-config";
+import { createThesisRules, type Align, type ParaFormat } from "../rules/format-rules";
+import type { Outline } from "../structure/outline";
+import type { LayoutHint, Role, Zone } from "../structure/roles";
 
-const cm = (v: number) => Math.round(v * 567);
+const ALIGN: Record<Align, (typeof AlignmentType)[keyof typeof AlignmentType]> = {
+  left: AlignmentType.LEFT,
+  center: AlignmentType.CENTER,
+  right: AlignmentType.RIGHT,
+  both: AlignmentType.JUSTIFIED,
+};
 
-export async function buildDocx(blocks: Block[], c: FormatConfig): Promise<Buffer> {
-  const font = c.fontFamily, size = c.fontSize * 2;
-  const line = { line: Math.round(c.lineSpacing * 240), lineRule: LineRuleType.AUTO };
-  const single = { line: 240, lineRule: LineRuleType.AUTO };
+const HEADING: Record<string, (typeof HeadingLevel)[keyof typeof HeadingLevel]> = {
+  Heading1: HeadingLevel.HEADING_1,
+  Heading2: HeadingLevel.HEADING_2,
+  Heading3: HeadingLevel.HEADING_3,
+};
 
-  const runs = (text: string, o: { bold?: boolean } = {}) =>
-    text.split("\n").map((t, i) => new TextRun({ text: t, font, size, bold: o.bold, break: i ? 1 : 0 }));
+export async function buildDocxFromText(
+  paragraphs: string[],
+  outline: Outline,
+  c: FormatConfig,
+): Promise<Buffer> {
+  const rules = createThesisRules(c);
+  const font = c.fontFamily;
+  const size = Math.round(c.fontSize * 2);
 
-  const toPara = (b: Block): Paragraph => {
-    switch (b.role) {
-      case "cover":
-        return new Paragraph({ alignment: AlignmentType.CENTER, spacing: { ...single, after: 120 }, children: runs(b.text, { bold: true }) });
-      case "chapter":
-        return new Paragraph({
-          heading: HeadingLevel.HEADING_1, alignment: AlignmentType.CENTER, pageBreakBefore: true,
-          spacing: { ...single, after: 240 },
-          children: runs(c.chapterUppercase ? b.text.toUpperCase() : b.text, { bold: true }),
-        });
-      case "section":
-        return new Paragraph({ heading: HeadingLevel.HEADING_2, keepNext: true, spacing: { ...single, before: 240, after: 120 }, children: runs(b.text, { bold: true }) });
-      case "subsection":
-        return new Paragraph({ heading: HeadingLevel.HEADING_3, keepNext: true, spacing: { ...single, before: 200, after: 120 }, children: runs(b.text, { bold: true }) });
-      case "figure_caption":
-        return new Paragraph({ alignment: AlignmentType.CENTER, spacing: { ...single, before: 60, after: 240 }, children: runs(b.text) });
-      case "table_caption":
-        return new Paragraph({ alignment: AlignmentType.CENTER, keepNext: true, spacing: { ...single, before: 240, after: 60 }, children: runs(b.text) });
-      case "reference":
-        return new Paragraph({ alignment: AlignmentType.LEFT, indent: { left: cm(1), hanging: cm(1) }, spacing: { ...single, after: 120 }, children: runs(b.text) });
-      default:
-        return new Paragraph({ alignment: AlignmentType.JUSTIFIED, indent: { firstLine: cm(c.indent) }, spacing: { ...line, after: 0 }, children: runs(b.text) });
-    }
+  const runs = (text: string, bold?: boolean, upper?: boolean) =>
+    (upper ? text.toUpperCase() : text)
+      .split("\n")
+      .map((t, i) => new TextRun({ text: t, font, size, bold, break: i ? 1 : 0 }));
+
+  const hintOf = (text: string, i: number): LayoutHint =>
+    outline.items[i]?.hint ?? {
+      align: null, tabCount: (text.match(/\t/g) || []).length, leadingTabsOnly: false,
+      listMarker: false, allBold: false, length: text.length, frontKind: null,
+    };
+
+  const toPara = (text: string, role: Role, zone: Zone, hint: LayoutHint, withBreak: boolean): Paragraph => {
+    const f: ParaFormat = rules.paragraph(role, zone, hint);
+    const r = rules.run(role, zone, hint);
+    return new Paragraph({
+      heading: f.styleId ? HEADING[f.styleId] : undefined,
+      alignment: f.align ? ALIGN[f.align] : undefined,
+      pageBreakBefore: withBreak,
+      keepNext: f.keepNext,
+      keepLines: f.keepLines,
+      spacing: {
+        before: f.before,
+        after: f.after,
+        ...(f.line ? { line: f.line, lineRule: LineRuleType.AUTO } : {}),
+      },
+      indent: f.hanging !== undefined
+        ? { left: f.left, hanging: f.hanging }
+        : f.firstLine
+          ? { firstLine: f.firstLine }
+          : undefined,
+      children: runs(text, r.bold, r.caps),
+    });
   };
 
-  const listPages = (title: string, items: string[]) => [
-    new Paragraph({ alignment: AlignmentType.CENTER, pageBreakBefore: true, spacing: { after: 240 }, children: runs(title, { bold: true }) }),
-    ...items.map((t) => new Paragraph({ spacing: { ...single, after: 100 }, children: runs(t) })),
-  ];
-
-  const coverEnd = blocks.findIndex((b) => b.role !== "cover");
-  const split = coverEnd === -1 ? blocks.length : coverEnd;
   const front: (Paragraph | TableOfContents)[] = [];
-  if (c.toc) {
-    front.push(new Paragraph({ alignment: AlignmentType.CENTER, pageBreakBefore: true, spacing: { after: 240 }, children: runs("DAFTAR ISI", { bold: true }) }));
+  if (c.tocMode === "rebuild") {
+    front.push(new Paragraph({
+      heading: HeadingLevel.HEADING_1, alignment: AlignmentType.CENTER,
+      pageBreakBefore: true, spacing: { after: 240 }, children: runs("DAFTAR ISI", true),
+    }));
     front.push(new TableOfContents("Daftar Isi", { hyperlink: true, headingStyleRange: "1-3" }));
   }
-  if (c.listFigures) { const f = blocks.filter((b) => b.role === "figure_caption").map((b) => b.text); if (f.length) front.push(...listPages("DAFTAR GAMBAR", f)); }
-  if (c.listTables) { const t = blocks.filter((b) => b.role === "table_caption").map((b) => b.text); if (t.length) front.push(...listPages("DAFTAR TABEL", t)); }
 
-  const hs = (id: string, name: string) => ({
+  const listPage = (title: string, items: string[]) => [
+    new Paragraph({
+      heading: HeadingLevel.HEADING_1, alignment: AlignmentType.CENTER,
+      pageBreakBefore: true, spacing: { after: 240 }, children: runs(title, true),
+    }),
+    ...items.map((t) => new Paragraph({
+      spacing: { line: 240, lineRule: LineRuleType.AUTO, after: 100 }, children: runs(t),
+    })),
+  ];
+
+  const textsOf = (role: Role) =>
+    paragraphs.filter((_, i) => outline.items[i]?.role === role);
+
+  if (c.listFigures) {
+    const f = textsOf("figure_caption");
+    if (f.length) front.push(...listPage("DAFTAR GAMBAR", f));
+  }
+  if (c.listTables) {
+    const t = textsOf("table_caption");
+    if (t.length) front.push(...listPage("DAFTAR TABEL", t));
+  }
+
+  const body = paragraphs.map((text, i) => {
+    const it = outline.items[i] ?? { role: "body" as Role, zone: "main" as Zone };
+    const hint = hintOf(text, i);
+    const f = rules.paragraph(it.role, it.zone, hint);
+    return toPara(text, it.role, it.zone, hint, Boolean(f.pageBreakBefore) && !it.breakAlreadyPresent);
+  });
+
+  const split = Math.min(outline.mainStart, body.length);
+
+  const hs = (id: string, name: string, level: number) => ({
     id, name, basedOn: "Normal", next: "Normal", quickFormat: true,
+    paragraph: { outlineLevel: level },
     run: { font, size, bold: true, color: "000000" },
   });
+
   const align = c.pageNumbers === "bottom-right" ? AlignmentType.RIGHT : AlignmentType.CENTER;
-  const paper = c.paper === "A4" ? { width: 11906, height: 16838 } : { width: 12240, height: 15840 };
+  const pageMain = rules.page("main");
+  const margin = {
+    top: pageMain.margin.top, bottom: pageMain.margin.bottom,
+    left: pageMain.margin.left, right: pageMain.margin.right,
+  };
+  const paper = { width: pageMain.widthTwips, height: pageMain.heightTwips };
+
+  const footer = c.pageNumbers === "none" || c.pageNumbers === "keep" ? undefined : {
+    default: new Footer({
+      children: [new Paragraph({
+        alignment: align,
+        children: [new TextRun({ children: [PageNumber.CURRENT], font, size })],
+      })],
+    }),
+  };
+
+  const sectionProps = (zone: "front" | "main") => ({
+    page: {
+      size: paper,
+      margin,
+      pageNumbers: {
+        start: 1,
+        formatType: rules.numbering(zone) === "lowerRoman"
+          ? NumberFormat.LOWER_ROMAN
+          : NumberFormat.DECIMAL,
+      },
+    },
+  });
+
+  const sections = split > 0
+    ? [
+        { properties: sectionProps("front"), footers: footer, children: [...body.slice(0, split), ...front] },
+        { properties: sectionProps("main"), footers: footer, children: body.slice(split) },
+      ]
+    : [{ properties: sectionProps("main"), footers: footer, children: [...front, ...body] }];
 
   const doc = new Document({
     features: { updateFields: true },
     styles: {
       default: { document: { run: { font, size } } },
-      paragraphStyles: [hs("Heading1", "heading 1"), hs("Heading2", "heading 2"), hs("Heading3", "heading 3")],
+      paragraphStyles: [hs("Heading1", "heading 1", 0), hs("Heading2", "heading 2", 1), hs("Heading3", "heading 3", 2)],
     },
-    sections: [{
-      properties: { page: { size: paper, margin: { top: cm(c.marginTop), bottom: cm(c.marginBottom), left: cm(c.marginLeft), right: cm(c.marginRight) } } },
-      footers: c.pageNumbers === "none" ? undefined : {
-        default: new Footer({ children: [new Paragraph({ alignment: align, children: [new TextRun({ children: [PageNumber.CURRENT], font, size })] })] }),
-      },
-      children: [...blocks.slice(0, split).map(toPara), ...front, ...blocks.slice(split).map(toPara)],
-    }],
+    sections,
   });
+
   return Packer.toBuffer(doc);
 }

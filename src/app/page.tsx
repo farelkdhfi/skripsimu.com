@@ -35,15 +35,15 @@ const faqs = [
 ];
 
 const steps = [
-  { icon: Upload, n: "01", title: "Unggah", desc: "Seret file DOCX atau PDF skripsimu.", tile: "bg-purple-100 text-purple-600" },
-  { icon: Settings2, n: "02", title: "Atur", desc: "Pilih aturan format atau gaya presentasi.", tile: "bg-green-100 text-green-600" },
-  { icon: Download, n: "03", title: "Unduh", desc: "Cek preview, lalu unduh DOCX atau PPTX.", tile: "bg-slate-900 text-white" },
+  { icon: Upload, n: "01", title: "Unggah", desc: "Seret file DOCX atau PDF skripsimu.", tile: "bg-neutral-800 text-neutral-200" },
+  { icon: Settings2, n: "02", title: "Atur", desc: "Pilih aturan format atau gaya presentasi.", tile: "bg-neutral-900 text-orange-300 ring-1 ring-orange-400/40" },
+  { icon: Download, n: "03", title: "Unduh", desc: "Cek preview, lalu unduh DOCX atau PPTX.", tile: "bg-orange-400 text-neutral-950" },
 ];
 
 const tutorials = [
   {
     format: "DOCX",
-    tag: "bg-purple-100 text-purple-700",
+    tag: "bg-orange-400/15 text-orange-300 ring-1 ring-orange-400/30",
     title: "Format skripsi",
     href: "/formatter",
     cta: "Buka formatter",
@@ -56,7 +56,7 @@ const tutorials = [
   },
   {
     format: "PPTX",
-    tag: "bg-green-100 text-green-700",
+    tag: "bg-orange-400/15 text-orange-300 ring-1 ring-orange-400/30",
     title: "Slide sidang",
     href: "/slides",
     cta: "Buka slides",
@@ -94,10 +94,10 @@ const EXTRA = 12; // cadangan di bawah supaya tidak ada celah saat awan naik-tur
 
 /* delay "rise" disetel supaya awan baru naik setelah intro selesai (~3.2s) */
 const clouds = [
-  { fill: "#D8B4FE", h: 300, base: 150, pattern: [[300, 70], [220, 50], [260, 85], [180, 45], [280, 65], [200, 55]] as Bump[], rise: "3.2s", bob: "9s", bobDelay: "-2s", drift: "80s", dir: "normal" },
-  { fill: "#F3E8FF", h: 240, base: 110, pattern: [[240, 60], [320, 80], [200, 50], [280, 70], [160, 45], [240, 55]] as Bump[], rise: "3.4s", bob: "7s", bobDelay: "-4s", drift: "62s", dir: "reverse" },
-  { fill: "#DCFCE7", h: 190, base: 90,  pattern: [[360, 70], [200, 45], [280, 65], [240, 50], [360, 60]] as Bump[],             rise: "3.6s", bob: "8s", bobDelay: "-1s", drift: "50s", dir: "normal" },
-  { fill: "#FFFFFF", h: 130, base: 60,  pattern: [[260, 48], [340, 58], [220, 40], [300, 52], [320, 44]] as Bump[],             rise: "3.8s", bob: "6s", bobDelay: "-3s", drift: "42s", dir: "reverse" },
+  { fill: "#D4D4D4", h: 300, base: 150, pattern: [[300, 70], [220, 50], [260, 85], [180, 45], [280, 65], [200, 55]] as Bump[], rise: "3.2s", bob: "9s", bobDelay: "-2s", drift: "80s", dir: "normal" },
+  { fill: "#E5E5E5", h: 240, base: 110, pattern: [[240, 60], [320, 80], [200, 50], [280, 70], [160, 45], [240, 55]] as Bump[], rise: "3.4s", bob: "7s", bobDelay: "-4s", drift: "62s", dir: "reverse" },
+  { fill: "#F5F5F5", h: 190, base: 90,  pattern: [[360, 70], [200, 45], [280, 65], [240, 50], [360, 60]] as Bump[],             rise: "3.6s", bob: "8s", bobDelay: "-1s", drift: "50s", dir: "normal" },
+  { fill: "#0A0A0A", h: 130, base: 60,  pattern: [[260, 48], [340, 58], [220, 40], [300, 52], [320, 44]] as Bump[],             rise: "3.8s", bob: "6s", bobDelay: "-3s", drift: "42s", dir: "reverse" },
 ].map((c) => ({ ...c, d: cloudPath(c.pattern, 3, c.base, c.h + EXTRA) }));
 
 /* ------------------------------ ANIMATION CSS ------------------------------ */
@@ -234,23 +234,23 @@ function DocxIcon({ className = "" }: { className?: string }) {
       <path
         d="M18 6H100L136 42V172a12 12 0 0 1-12 12H18a12 12 0 0 1-12-12V18A12 12 0 0 1 18 6Z"
         fill="#fff"
-        stroke="#CBD5E1"
+        stroke="#D4D4D4"
         strokeWidth="2.5"
       />
-      <path d="M100 6V30a12 12 0 0 0 12 12H136Z" fill="#F1F5F9" />
-      <rect x="22" y="24" width="54" height="22" rx="11" fill="#0F172A" />
+      <path d="M100 6V30a12 12 0 0 0 12 12H136Z" fill="#F5F5F5" />
+      <rect x="22" y="24" width="54" height="22" rx="11" fill="#171717" />
       <text x="49" y="39" textAnchor="middle" fontSize="10" fontWeight="700" fill="#fff" fontFamily="ui-sans-serif, system-ui, sans-serif">
         DOCX
       </text>
-      <rect x="22" y="64" width="92" height="8" rx="4" fill="#CBD5E1" />
-      <rect x="22" y="84" width="96" height="5" rx="2.5" fill="#EEF2F7" />
-      <rect x="22" y="96" width="74" height="12" rx="4" fill="#DCFCE7" />
-      <rect x="22" y="99" width="70" height="5" rx="2.5" fill="#E2E8F0" />
-      <rect x="22" y="116" width="96" height="5" rx="2.5" fill="#EEF2F7" />
-      <rect x="22" y="128" width="62" height="5" rx="2.5" fill="#EEF2F7" />
-      <rect x="22" y="140" width="80" height="5" rx="2.5" fill="#EEF2F7" />
-      <circle cx="112" cy="158" r="14" fill="#E9D5FF" />
-      <path d="M105.5 158.5l5 5 9-10" stroke="#9333EA" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+      <rect x="22" y="64" width="92" height="8" rx="4" fill="#D4D4D4" />
+      <rect x="22" y="84" width="96" height="5" rx="2.5" fill="#F5F5F5" />
+      <rect x="22" y="96" width="74" height="12" rx="4" fill="#E5E5E5" />
+      <rect x="22" y="99" width="70" height="5" rx="2.5" fill="#D4D4D4" />
+      <rect x="22" y="116" width="96" height="5" rx="2.5" fill="#F5F5F5" />
+      <rect x="22" y="128" width="62" height="5" rx="2.5" fill="#F5F5F5" />
+      <rect x="22" y="140" width="80" height="5" rx="2.5" fill="#F5F5F5" />
+      <circle cx="112" cy="158" r="14" fill="#FED7AA" />
+      <path d="M105.5 158.5l5 5 9-10" stroke="#EA580C" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -258,25 +258,25 @@ function DocxIcon({ className = "" }: { className?: string }) {
 function PptIcon({ className = "" }: { className?: string }) {
   return (
     <svg viewBox="0 0 230 160" fill="none" className={className} role="img" aria-label="Slide PPT">
-      <rect x="4" y="4" width="222" height="152" rx="16" fill="#fff" stroke="#E9D5FF" strokeWidth="2.5" />
-      <circle cx="24" cy="24" r="4.5" fill="#E9D5FF" />
-      <circle cx="38" cy="24" r="4.5" fill="#BBF7D0" />
-      <circle cx="52" cy="24" r="4.5" fill="#CBD5E1" />
-      <rect x="164" y="14" width="46" height="20" rx="10" fill="#C084FC" />
+      <rect x="4" y="4" width="222" height="152" rx="16" fill="#fff" stroke="#E5E5E5" strokeWidth="2.5" />
+      <circle cx="24" cy="24" r="4.5" fill="#E5E5E5" />
+      <circle cx="38" cy="24" r="4.5" fill="#D4D4D4" />
+      <circle cx="52" cy="24" r="4.5" fill="#A3A3A3" />
+      <rect x="164" y="14" width="46" height="20" rx="10" fill="#737373" />
       <text x="187" y="28" textAnchor="middle" fontSize="10" fontWeight="700" fill="#fff" fontFamily="ui-sans-serif, system-ui, sans-serif">
         PPT
       </text>
-      <rect x="22" y="48" width="104" height="9" rx="4.5" fill="#E2E8F0" />
-      <rect x="22" y="64" width="72" height="5" rx="2.5" fill="#EEF2F7" />
-      <rect x="26" y="112" width="16" height="28" rx="4" fill="#E2E8F0" />
-      <rect x="50" y="96" width="16" height="44" rx="4" fill="#E9D5FF" />
-      <rect x="74" y="84" width="16" height="56" rx="4" fill="#BBF7D0" />
-      <rect x="98" y="104" width="16" height="36" rx="4" fill="#0F172A" />
-      <path d="M20 141H122" stroke="#E2E8F0" strokeWidth="2" strokeLinecap="round" />
+      <rect x="22" y="48" width="104" height="9" rx="4.5" fill="#E5E5E5" />
+      <rect x="22" y="64" width="72" height="5" rx="2.5" fill="#F5F5F5" />
+      <rect x="26" y="112" width="16" height="28" rx="4" fill="#E5E5E5" />
+      <rect x="50" y="96" width="16" height="44" rx="4" fill="#D4D4D4" />
+      <rect x="74" y="84" width="16" height="56" rx="4" fill="#A3A3A3" />
+      <rect x="98" y="104" width="16" height="36" rx="4" fill="#171717" />
+      <path d="M20 141H122" stroke="#E5E5E5" strokeWidth="2" strokeLinecap="round" />
       <g transform="rotate(-90 172 96)">
-        <circle cx="172" cy="96" r="26" stroke="#BBF7D0" strokeWidth="13" />
-        <circle cx="172" cy="96" r="26" stroke="#D8B4FE" strokeWidth="13" strokeDasharray="70 163.4" />
-        <circle cx="172" cy="96" r="26" stroke="#1E293B" strokeWidth="13" strokeDasharray="42 163.4" strokeDashoffset="-70" />
+        <circle cx="172" cy="96" r="26" stroke="#D4D4D4" strokeWidth="13" />
+        <circle cx="172" cy="96" r="26" stroke="#A3A3A3" strokeWidth="13" strokeDasharray="70 163.4" />
+        <circle cx="172" cy="96" r="26" stroke="#262626" strokeWidth="13" strokeDasharray="42 163.4" strokeDashoffset="-70" />
       </g>
     </svg>
   );
@@ -285,15 +285,15 @@ function PptIcon({ className = "" }: { className?: string }) {
 function BooksIcon({ className = "" }: { className?: string }) {
   return (
     <svg viewBox="0 0 140 120" fill="none" className={className} role="img" aria-label="Tumpukan buku">
-      <rect x="12" y="80" width="116" height="28" rx="7" fill="#E9D5FF" />
-      <rect x="30" y="80" width="8" height="28" fill="#C084FC" />
-      <rect x="98" y="80" width="4" height="28" fill="#C084FC" />
-      <rect x="22" y="52" width="100" height="28" rx="7" fill="#BBF7D0" />
-      <rect x="38" y="52" width="8" height="28" fill="#86EFAC" />
-      <rect x="86" y="52" width="4" height="28" fill="#86EFAC" />
-      <rect x="14" y="24" width="92" height="28" rx="7" fill="#0F172A" />
-      <rect x="30" y="24" width="6" height="28" fill="#E9D5FF" />
-      <rect x="74" y="24" width="4" height="28" fill="#BBF7D0" />
+      <rect x="12" y="80" width="116" height="28" rx="7" fill="#404040" />
+      <rect x="30" y="80" width="8" height="28" fill="#737373" />
+      <rect x="98" y="80" width="4" height="28" fill="#737373" />
+      <rect x="22" y="52" width="100" height="28" rx="7" fill="#525252" />
+      <rect x="38" y="52" width="8" height="28" fill="#737373" />
+      <rect x="86" y="52" width="4" height="28" fill="#737373" />
+      <rect x="14" y="24" width="92" height="28" rx="7" fill="#FB923C" />
+      <rect x="30" y="24" width="6" height="28" fill="#C2410C" />
+      <rect x="74" y="24" width="4" height="28" fill="#EA580C" />
     </svg>
   );
 }
@@ -301,16 +301,16 @@ function BooksIcon({ className = "" }: { className?: string }) {
 function OrbitIcon({ className = "" }: { className?: string }) {
   return (
     <svg viewBox="0 0 160 160" fill="none" className={className} aria-hidden="true">
-      <circle cx="80" cy="80" r="30" stroke="#D8B4FE" strokeWidth="2" />
-      <circle cx="80" cy="80" r="52" stroke="#E9D5FF" strokeWidth="2" strokeDasharray="4 6" />
-      <circle cx="80" cy="80" r="74" stroke="#BBF7D0" strokeWidth="2" />
+      <circle cx="80" cy="80" r="30" stroke="#737373" strokeWidth="2" />
+      <circle cx="80" cy="80" r="52" stroke="#FB923C" strokeOpacity=".55" strokeWidth="2" strokeDasharray="4 6" />
+      <circle cx="80" cy="80" r="74" stroke="#404040" strokeWidth="2" />
       <g className="spin-slow" style={{ transformOrigin: "80px 80px" }}>
-        <circle cx="132" cy="80" r="7" fill="#0F172A" />
-        <circle cx="28" cy="80" r="6" fill="#BBF7D0" />
-        <circle cx="80" cy="6" r="6" fill="#D8B4FE" />
+        <circle cx="132" cy="80" r="7" fill="#F5F5F5" />
+        <circle cx="28" cy="80" r="6" fill="#A3A3A3" />
+        <circle cx="80" cy="6" r="6" fill="#FB923C" />
       </g>
-      <circle cx="80" cy="80" r="18" fill="#0F172A" />
-      <path d="M72 80.5l6 6 11-12" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="80" cy="80" r="18" fill="#FB923C" />
+      <path d="M72 80.5l6 6 11-12" stroke="#171717" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -320,6 +320,16 @@ function IconDot({ icon: Icon, className = "" }: { icon: LucideIcon; className?:
     <span className={`grid size-10 place-items-center rounded-full ${className}`}>
       <Icon className="size-4" />
     </span>
+  );
+}
+
+/* label kecil di atas judul section, dengan titik orange */
+function Eyebrow({ children }: { children: ReactNode }) {
+  return (
+    <p className="flex items-center gap-2 text-sm font-medium text-orange-400">
+      <span className="size-1.5 rounded-full bg-orange-400" aria-hidden="true" />
+      {children}
+    </p>
   );
 }
 
@@ -344,7 +354,7 @@ function Intro() {
           </div>
         </div>
         <p
-          className="fade-up mt-8 text-2xl font-normal tracking-tight text-slate-900 sm:text-3xl"
+          className="fade-up mt-8 text-2xl font-normal tracking-tight text-neutral-900 sm:text-3xl"
           style={{ animationDelay: "0.7s" }}
         >
           {siteConfig.name}
@@ -353,11 +363,11 @@ function Intro() {
 
       {/* kabut: tiga gumpalan menyapu masuk dan menutup layar */}
       <div
-        className="fog absolute -bottom-[25vmax] -left-[20vmax] z-20 size-[75vmax] rounded-full bg-purple-100 blur-3xl"
+        className="fog absolute -bottom-[25vmax] -left-[20vmax] z-20 size-[75vmax] rounded-full bg-neutral-200 blur-3xl"
         style={{ "--fx": "-25%", "--fy": "25%", animationDelay: "1.8s" } as CSSProperties}
       />
       <div
-        className="fog absolute -bottom-[20vmax] -right-[20vmax] z-20 size-[70vmax] rounded-full bg-green-100 blur-3xl"
+        className="fog absolute -bottom-[20vmax] -right-[20vmax] z-20 size-[70vmax] rounded-full bg-neutral-100 blur-3xl"
         style={{ "--fx": "25%", "--fy": "25%", animationDelay: "2s" } as CSSProperties}
       />
       <div className="absolute inset-0 z-30 grid place-items-center">
@@ -397,7 +407,7 @@ function FeatureCell({
         <h3 className={`absolute bottom-6 left-6 text-xl font-medium leading-snug ${titleClass}`}>{title}</h3>
       </div>
       {/* penjelasan: tanpa card */}
-      <p className="mt-4 max-w-md px-1 text-sm leading-relaxed text-slate-600">{desc}</p>
+      <p className="mt-4 max-w-md px-1 text-sm leading-relaxed text-neutral-400">{desc}</p>
     </div>
   );
 }
@@ -408,11 +418,12 @@ function Bento() {
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         {/* judul section: teks biasa, bukan card */}
         <div className="col-span-2 flex flex-col justify-end pb-4 lg:col-start-3 lg:row-start-1">
-          <p className="text-sm text-slate-500">Fitur</p>
-          <h2 className="mt-2 text-4xl font-normal leading-[1.1] tracking-tight text-slate-900 sm:text-5xl">
-            Satu alur dari skripsi sampai sidang
+          <Eyebrow>Fitur</Eyebrow>
+          <h2 className="mt-2 text-4xl font-normal leading-[1.1] tracking-tight text-white sm:text-5xl">
+            Satu alur dari skripsi sampai{" "}
+            <span className="text-orange-400">sidang</span>
           </h2>
-          <p className="mt-3 max-w-md text-sm leading-relaxed text-slate-600">
+          <p className="mt-3 max-w-md text-sm leading-relaxed text-neutral-400">
             Format skripsi, buat slide, dan tetap pegang kendali atas isinya.
           </p>
         </div>
@@ -423,12 +434,16 @@ function Bento() {
           title="AI Thesis Formatter"
           desc="Margin, font, spasi, heading, daftar isi, dan daftar pustaka diterapkan konsisten."
           className="col-span-2 lg:col-span-2 lg:col-start-1 lg:row-span-2 lg:row-start-1"
-          cardClass="bg-purple-100 text-slate-900"
-          chipClass="bg-white/70 text-slate-700"
+          cardClass="bg-neutral-800 text-white"
+          chipClass="bg-orange-400 text-neutral-950"
         >
           <div className="absolute left-6 top-16 flex gap-2">
             {[Ruler, Type, ListOrdered, BookMarked].map((Icon, i) => (
-              <IconDot key={i} icon={Icon} className="bg-white text-slate-900" />
+              <IconDot
+                key={i}
+                icon={Icon}
+                className={i === 0 ? "bg-orange-400 text-neutral-950" : "bg-white/10 text-white"}
+              />
             ))}
           </div>
           <div className="absolute -bottom-8 -right-3 w-[46%] max-w-[200px] rotate-6">
@@ -439,14 +454,14 @@ function Bento() {
         </FeatureCell>
 
         {/* ikon saja: buku */}
-        <div className="col-span-1 grid min-h-[190px] place-items-center rounded-[2rem] bg-green-100 lg:col-start-3 lg:row-start-2">
+        <div className="col-span-1 grid min-h-[190px] place-items-center rounded-[2rem] bg-neutral-900 lg:col-start-3 lg:row-start-2">
           <div className="float">
             <BooksIcon className="w-24 sm:w-28" />
           </div>
         </div>
 
         {/* ikon saja: orbit */}
-        <div className="col-span-1 grid min-h-[190px] place-items-center rounded-[2rem] border border-slate-200 bg-white lg:col-start-4 lg:row-start-2">
+        <div className="col-span-1 grid min-h-[190px] place-items-center rounded-[2rem] border border-orange-400/30 bg-neutral-950 lg:col-start-4 lg:row-start-2">
           <OrbitIcon className="w-28 sm:w-32" />
         </div>
 
@@ -456,13 +471,17 @@ function Bento() {
           title="Skripsi to Slides"
           desc="Alur presentasi 5 sampai 40 slide dengan poin kunci dan catatan presenter."
           className="col-span-2 lg:col-span-3"
-          cardClass="bg-green-100 text-slate-900"
-          chipClass="bg-white/70 text-slate-700"
+          cardClass="bg-neutral-900 text-white"
+          chipClass="bg-orange-400 text-neutral-950"
         >
-          <span className="absolute right-10 top-8 size-24 rounded-full bg-purple-200 sm:right-24 sm:size-32" />
+          <span className="absolute right-10 top-8 size-24 rounded-full bg-orange-400 sm:right-24 sm:size-32" />
           <div className="absolute left-6 top-16 flex gap-2">
             {[Presentation, StickyNote, LayoutGrid].map((Icon, i) => (
-              <IconDot key={i} icon={Icon} className="bg-white text-slate-900" />
+              <IconDot
+                key={i}
+                icon={Icon}
+                className={i === 0 ? "bg-orange-400 text-neutral-950" : "bg-white/10 text-white"}
+              />
             ))}
           </div>
           <div className="absolute -bottom-8 right-4 w-[50%] max-w-[300px] -rotate-3">
@@ -478,16 +497,16 @@ function Bento() {
           title="Isi tetap milikmu"
           desc="Tanpa database dan tanpa penyimpanan permanen. AI tidak mengarang substansi."
           className="col-span-2 lg:col-span-1"
-          cardClass="bg-slate-900 text-white"
-          chipClass="bg-white/15 text-white"
+          cardClass="bg-orange-200 text-neutral-900"
+          chipClass="bg-black/10 text-neutral-800"
           titleClass="max-w-[80%]"
         >
-          <span className="absolute right-5 top-5 grid size-14 place-items-center rounded-full bg-green-200 text-slate-900">
+          <span className="absolute right-5 top-5 grid size-14 place-items-center rounded-full bg-neutral-900 text-orange-300">
             <ShieldCheck className="size-6" />
           </span>
           <div className="absolute left-6 top-16 flex gap-2">
             {[Lock, EyeOff].map((Icon, i) => (
-              <IconDot key={i} icon={Icon} className="bg-white/10 text-white" />
+              <IconDot key={i} icon={Icon} className="bg-black/10 text-neutral-900" />
             ))}
           </div>
         </FeatureCell>
@@ -500,7 +519,7 @@ function Bento() {
 
 export default function Landing() {
   return (
-    <main className="bg-white text-slate-700">
+    <main className="bg-neutral-950 text-neutral-300">
       <style dangerouslySetInnerHTML={{ __html: css }} />
 
       {/* selalu mulai dari atas + kunci scroll selama intro */}
@@ -511,14 +530,14 @@ export default function Landing() {
 
       {/* ================================ HERO ================================ */}
       <section className="relative isolate overflow-hidden bg-white">
-        {/* lingkaran ungu (matahari) + ripple */}
+        {/* lingkaran (matahari) + ripple */}
         <div className="pointer-events-none absolute inset-x-0 bottom-0 z-0 flex justify-center" aria-hidden="true">
           <div
-            className="sun relative -mb-[100px] size-[440px] rounded-full bg-purple-200 sm:-mb-[200px] sm:size-[640px]"
+            className="sun relative -mb-[100px] size-[440px] rounded-full bg-orange-400 sm:-mb-[200px] sm:size-[640px]"
             style={{ animationDelay: "3.1s" }}
           >
-            <span className="ripple absolute inset-0 rounded-full border-2 border-purple-300" style={{ animationDelay: "5s" }} />
-            <span className="ripple absolute inset-0 rounded-full border-2 border-purple-300" style={{ animationDelay: "8s" }} />
+            <span className="ripple absolute inset-0 rounded-full border-2 border-orange-400" style={{ animationDelay: "5s" }} />
+            <span className="ripple absolute inset-0 rounded-full border-2 border-orange-400" style={{ animationDelay: "8s" }} />
           </div>
         </div>
 
@@ -547,19 +566,19 @@ export default function Landing() {
 
         {/* teks hero */}
         <div className="relative z-20 mx-auto flex min-h-[calc(100svh-4rem)] max-w-3xl flex-col items-center justify-center px-4 pb-56 pt-10 text-center sm:pb-64">
-          <p className="fade-up text-sm text-slate-700" style={{ animationDelay: "3.8s" }}>
+          <p className="fade-up text-sm text-neutral-700" style={{ animationDelay: "3.8s" }}>
             Untuk mahasiswa tingkat akhir
           </p>
 
           <h1
-            className="fade-up mt-3 max-w-3xl text-4xl font-semibold leading-[1.1] tracking-tight text-slate-900 sm:text-6xl"
+            className="fade-up mt-3 max-w-3xl text-4xl font-semibold leading-[1.1] tracking-tight text-neutral-900 sm:text-6xl"
             style={{ animationDelay: "4s" }}
           >
             Skripsi rapi dan presentasi siap, tanpa begadang.
           </h1>
 
           <p
-            className="fade-up mt-5 max-w-xl text-base leading-relaxed text-slate-700"
+            className="fade-up mt-5 max-w-xl text-base leading-relaxed text-neutral-700"
             style={{ animationDelay: "4.2s" }}
           >
             Unggah skripsimu, biarkan AI memahami strukturnya, lalu unduh DOCX yang sesuai standar dan slide sidang yang siap dipresentasikan.
@@ -569,9 +588,9 @@ export default function Landing() {
             className="fade-up mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row"
             style={{ animationDelay: "4.4s" }}
           >
-            <Button asChild className="h-12 rounded-full bg-slate-900 pl-2 pr-6 text-sm text-white hover:bg-slate-800">
+            <Button asChild className="h-12 rounded-full bg-neutral-900 pl-2 pr-6 text-sm text-white hover:bg-neutral-800">
               <Link href="/formatter">
-                <span className="grid size-8 place-items-center rounded-full bg-slate-700">
+                <span className="grid size-8 place-items-center rounded-full bg-neutral-700">
                   <FileCheck2 className="size-4" />
                 </span>
                 Mulai format skripsi
@@ -580,10 +599,10 @@ export default function Landing() {
             <Button
               asChild
               variant="outline"
-              className="h-12 rounded-full border-slate-200 bg-white/90 pl-2 pr-6 text-sm text-slate-900 hover:bg-white"
+              className="h-12 rounded-full border-neutral-200 bg-white/90 pl-2 pr-6 text-sm text-neutral-900 hover:bg-white"
             >
               <Link href="/slides">
-                <span className="grid size-8 place-items-center rounded-full bg-slate-100">
+                <span className="grid size-8 place-items-center rounded-full bg-neutral-100">
                   <Presentation className="size-4" />
                 </span>
                 Buat presentasi
@@ -598,23 +617,25 @@ export default function Landing() {
 
       {/* ============================= TIGA LANGKAH =========================== */}
       <section id="cara-kerja" className="mx-auto max-w-5xl px-4 pb-20 pt-8">
-        <div className="text-center">
-          <p className="text-sm text-slate-500">Cara kerja</p>
-          <h2 className="mt-2 text-3xl font-normal tracking-tight text-slate-900 sm:text-4xl">Tiga langkah saja</h2>
+        <div className="flex flex-col items-center text-center">
+          <Eyebrow>Cara kerja</Eyebrow>
+          <h2 className="mt-2 text-3xl font-normal tracking-tight text-white sm:text-4xl">
+            Tiga langkah <span className="text-orange-400">saja</span>
+          </h2>
         </div>
 
         <div className="relative mt-14 grid gap-10 md:grid-cols-3">
-          <div className="absolute left-[17%] right-[17%] top-8 hidden border-t border-dashed border-slate-300 md:block" aria-hidden="true" />
+          <div className="absolute left-[17%] right-[17%] top-8 hidden border-t border-dashed border-orange-400/40 md:block" aria-hidden="true" />
           {steps.map(({ icon: Icon, n, title, desc, tile }) => (
             <div key={n} className="relative text-center">
               <div className={`relative mx-auto grid size-16 place-items-center rounded-full ${tile}`}>
                 <Icon className="size-6" />
-                <span className="absolute -right-1 -top-1 grid size-6 place-items-center rounded-full border border-slate-200 bg-white text-[10px] font-medium text-slate-900">
+                <span className="absolute -right-1 -top-1 grid size-6 place-items-center rounded-full border border-orange-400/60 bg-neutral-950 text-[10px] font-medium text-orange-300">
                   {n}
                 </span>
               </div>
-              <h3 className="mt-5 font-medium text-slate-900">{title}</h3>
-              <p className="mx-auto mt-1 max-w-[16rem] text-sm text-slate-600">{desc}</p>
+              <h3 className="mt-5 font-medium text-white">{title}</h3>
+              <p className="mx-auto mt-1 max-w-[16rem] text-sm text-neutral-400">{desc}</p>
             </div>
           ))}
         </div>
@@ -623,9 +644,9 @@ export default function Landing() {
       {/* ============================ TUTORIAL SINGKAT ======================== */}
       <section id="tutorial" className="mx-auto max-w-5xl px-4 pb-24 pt-8">
         <div className="max-w-xl">
-          <p className="text-sm text-slate-500">Tutorial</p>
-          <h2 className="mt-2 text-3xl font-normal tracking-tight text-slate-900 sm:text-4xl">Tutorial singkat</h2>
-          <p className="mt-2 text-sm text-slate-600">Dua alur utama. Ikuti langkahnya satu per satu.</p>
+          <Eyebrow>Tutorial</Eyebrow>
+          <h2 className="mt-2 text-3xl font-normal tracking-tight text-white sm:text-4xl">Tutorial singkat</h2>
+          <p className="mt-2 text-sm text-neutral-400">Dua alur utama. Ikuti langkahnya satu per satu.</p>
         </div>
 
         <div className="mt-10 grid gap-12 md:grid-cols-2 md:gap-16">
@@ -633,20 +654,20 @@ export default function Landing() {
             <div key={t.title}>
               <div className="flex items-center gap-3">
                 <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${t.tag}`}>{t.format}</span>
-                <h3 className="text-lg font-medium text-slate-900">{t.title}</h3>
+                <h3 className="text-lg font-medium text-white">{t.title}</h3>
               </div>
 
               <ol className="mt-6">
                 {t.steps.map(([title, desc], i) => (
                   <li
                     key={title}
-                    className="relative pb-6 pl-11 last:pb-0 before:absolute before:bottom-1 before:left-3.5 before:top-9 before:w-px before:bg-slate-200 last:before:hidden"
+                    className="relative pb-6 pl-11 last:pb-0 before:absolute before:bottom-1 before:left-3.5 before:top-9 before:w-px before:bg-orange-400/25 last:before:hidden"
                   >
-                    <span className="absolute left-0 top-0 grid size-7 place-items-center rounded-full bg-slate-900 text-xs font-medium text-white">
+                    <span className="absolute left-0 top-0 grid size-7 place-items-center rounded-full bg-orange-400 text-xs font-semibold text-neutral-950">
                       {i + 1}
                     </span>
-                    <h4 className="font-medium text-slate-900">{title}</h4>
-                    <p className="mt-1 text-sm leading-relaxed text-slate-600">{desc}</p>
+                    <h4 className="font-medium text-white">{title}</h4>
+                    <p className="mt-1 text-sm leading-relaxed text-neutral-400">{desc}</p>
                   </li>
                 ))}
               </ol>
@@ -654,7 +675,7 @@ export default function Landing() {
               <Button
                 asChild
                 variant="outline"
-                className="mt-8 rounded-full border-slate-300 bg-white px-6 text-slate-900 hover:bg-slate-50"
+                className="mt-8 rounded-full border-orange-400/50 bg-transparent px-6 text-orange-300 hover:border-orange-400 hover:bg-orange-400 hover:text-neutral-950"
               >
                 <Link href={t.href}>{t.cta}</Link>
               </Button>
@@ -662,10 +683,10 @@ export default function Landing() {
           ))}
         </div>
 
-        <div className="mt-14 grid gap-3 rounded-[2rem] bg-green-50 p-6 text-sm text-slate-700 sm:grid-cols-3">
+        <div className="mt-14 grid gap-3 rounded-[2rem] border border-orange-400/20 bg-neutral-900 p-6 text-sm text-neutral-300 sm:grid-cols-3">
           {tips.map((tip) => (
             <p key={tip} className="flex items-start gap-2">
-              <Check className="mt-0.5 size-4 shrink-0 text-slate-900" />
+              <Check className="mt-0.5 size-4 shrink-0 text-orange-400" />
               {tip}
             </p>
           ))}
@@ -676,17 +697,17 @@ export default function Landing() {
       <section id="faq" className="mx-auto max-w-5xl px-4 pb-24">
         <div className="grid gap-8 md:grid-cols-[1fr_2fr] md:gap-12">
           <div>
-            <p className="text-sm text-slate-500">FAQ</p>
-            <h2 className="mt-2 text-3xl font-normal tracking-tight text-slate-900 sm:text-4xl">Pertanyaan umum</h2>
+            <Eyebrow>FAQ</Eyebrow>
+            <h2 className="mt-2 text-3xl font-normal tracking-tight text-white sm:text-4xl">Pertanyaan umum</h2>
           </div>
-          <div className="divide-y divide-slate-200 border-y border-slate-200">
+          <div className="divide-y divide-neutral-800 border-y border-neutral-800">
             {faqs.map(([q, a]) => (
               <details key={q} className="group py-4">
-                <summary className="flex cursor-pointer list-none items-center justify-between gap-4 font-medium text-slate-900 [&::-webkit-details-marker]:hidden">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-4 font-medium text-white transition-colors hover:text-orange-300 group-open:text-orange-300 [&::-webkit-details-marker]:hidden">
                   {q}
-                  <Plus className="size-4 shrink-0 text-slate-400 transition-transform group-open:rotate-45" />
+                  <Plus className="size-4 shrink-0 text-orange-400 transition-transform group-open:rotate-45" />
                 </summary>
-                <p className="mt-2 pr-8 text-sm leading-relaxed text-slate-600">{a}</p>
+                <p className="mt-2 pr-8 text-sm leading-relaxed text-neutral-400">{a}</p>
               </details>
             ))}
           </div>
@@ -695,20 +716,24 @@ export default function Landing() {
 
       {/* ================================= CTA ================================ */}
       <section className="mx-auto max-w-6xl px-4 pb-20">
-        <div className="relative overflow-hidden rounded-[2rem] bg-slate-900 p-8 text-white sm:p-12">
-          <span className="absolute -bottom-24 -right-16 size-64 rounded-full bg-purple-300" aria-hidden="true" />
-          <span className="absolute right-44 top-10 hidden size-5 rounded-full bg-green-200 sm:block" aria-hidden="true" />
+        <div className="relative overflow-hidden rounded-[2rem] bg-neutral-900 p-8 text-white sm:p-12">
+          <span className="absolute -bottom-24 -right-16 size-64 rounded-full bg-orange-400" aria-hidden="true" />
+          <span className="ripple absolute -bottom-24 -right-16 size-64 rounded-full border-2 border-orange-300" aria-hidden="true" />
+          <span className="absolute right-44 top-10 hidden size-5 rounded-full bg-orange-300 sm:block" aria-hidden="true" />
+          <span className="absolute bottom-10 right-72 hidden size-3 rounded-full bg-orange-500 sm:block" aria-hidden="true" />
           <div className="relative max-w-lg">
-            <h2 className="text-3xl font-normal tracking-tight">Siap merapikan skripsimu?</h2>
-            <p className="mt-3 text-sm text-slate-300">Mulai dari format DOCX, lanjut ke slide sidang dalam satu alur.</p>
+            <h2 className="text-3xl font-normal tracking-tight">
+              Siap merapikan <span className="text-orange-400">skripsimu?</span>
+            </h2>
+            <p className="mt-3 text-sm text-neutral-300">Mulai dari format DOCX, lanjut ke slide sidang dalam satu alur.</p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-              <Button asChild className="rounded-full bg-white px-6 text-slate-900 hover:bg-slate-100">
+              <Button asChild className="rounded-full bg-orange-400 px-6 font-medium text-neutral-950 hover:bg-orange-300">
                 <Link href="/formatter">Mulai format skripsi</Link>
               </Button>
               <Button
                 asChild
                 variant="outline"
-                className="rounded-full border-slate-600 bg-transparent px-6 text-white hover:bg-slate-800 hover:text-white"
+                className="rounded-full border-neutral-600 bg-transparent px-6 text-white hover:border-orange-400 hover:bg-neutral-800 hover:text-orange-300"
               >
                 <Link href="/slides">Buat presentasi</Link>
               </Button>
@@ -717,7 +742,8 @@ export default function Landing() {
         </div>
       </section>
 
-      <footer className="border-t border-slate-200 py-6 text-center text-xs text-slate-400">
+      <footer className="flex items-center justify-center gap-2 border-t border-neutral-800 py-6 text-center text-xs text-neutral-500">
+        <span className="size-1.5 rounded-full bg-orange-400" aria-hidden="true" />
         Periksa kembali hasil akhir sebelum dikumpulkan.
       </footer>
     </main>

@@ -2,11 +2,10 @@ import { z } from "zod";
 import { askJson } from "@/features/ai/services/openrouter";
 import { structureSystem, structureUser } from "@/features/ai/prompts";
 import { mapLimit } from "@/lib/concurrency";
-import { preclassify } from "../utils/preclassify";
-import type { Role } from "../types";
+import { classifyByRule, scanStructure, type Role, type Signals } from "../structure/roles";
 
-const BATCH = 150;        // baris per request AI
-const MAX_BATCHES = 5;    // maks ±750 baris kandidat per dokumen
+const BATCH = 150;
+const MAX_BATCHES = 5;
 const CONCURRENCY = 3;
 
 const CODES: Record<string, Role> = { c: "chapter", s: "section", u: "subsection", v: "cover" };
@@ -45,45 +44,71 @@ const schema = z.preprocess(
 );
 
 function isCandidate(t: string, i: number) {
-  if (i < 30) return t.length <= 120; // area sampul
+  if (i < 30) return t.length <= 120;
   return (
     t.length >= 3 && t.length <= 100 &&
     t.split(/\s+/).length <= 14 &&
     !/[.!?;,:]$/.test(t) &&
-    !/[\s.]\d{1,3}$/.test(t) && // sisa daftar isi (berakhir nomor halaman)
+    !/[\s.]\d{1,3}$/.test(t) &&
     !/^[a-z]/.test(t)
   );
 }
 
-export async function classifyParagraphs(paragraphs: string[]) {
-  const roles: (Role | null)[] = paragraphs.map(preclassify);
-  const cands = paragraphs
-    .map((t, i) => ({ i, t: t.slice(0, 100) }))
-    .filter((x) => roles[x.i] === null && isCandidate(paragraphs[x.i], x.i));
+export type ClassifyResult = {
+  /** Peran per indeks node; `null` berarti AI tidak memutuskan apa pun. */
+  roles: (Role | null)[];
+  recommendations: string[];
+  notices: string[];
+};
 
-  const batches = [];
+/**
+ * AI hanya dipanggil untuk node yang TIDAK bisa diputuskan oleh aturan.
+ * Penanda struktural yang sudah pasti (BAB, 1.1, DAFTAR PUSTAKA, keterangan
+ * gambar) tidak pernah ditimpa oleh model, sehingga urutan dan susunan
+ * dokumen tidak bisa berubah gara-gara tebakan AI.
+ */
+export async function classifyNodes(signals: Signals[]): Promise<ClassifyResult> {
+  const { zones, inList } = scanStructure(signals);
+  const roles: (Role | null)[] = signals.map((s, i) => {
+    const r = classifyByRule(s, zones[i], inList[i]);
+    return r === "empty" ? null : r;
+  });
+
+  const cands = signals
+    .map((s, i) => ({ i, t: s.text.slice(0, 100) }))
+    .filter((x) => !signals[x.i].isTable && roles[x.i] === null && x.t.trim() && isCandidate(signals[x.i].text, x.i));
+
+  const batches: { n: number; items: { i: number; t: string }[] }[] = [];
   for (let s = 0; s < cands.length; s += BATCH) batches.push({ n: batches.length, items: cands.slice(s, s + BATCH) });
 
   const deadline = Date.now() + (Number(process.env.AI_TIME_BUDGET_MS) || 100_000);
   const recs = new Set<string>();
-  const unanalyzed: number[] = []; // indeks paragraf pertama dari tiap batch yang tidak terproses
+  const unanalyzed: number[] = [];
+  let budgetSkips = 0;
+  let failures = 0;
+  const out: (Role | null)[] = signals.map(() => null);
 
   await mapLimit(batches, CONCURRENCY, async ({ n, items }) => {
-    if (n >= MAX_BATCHES || Date.now() > deadline - 3000) { unanalyzed.push(items[0].i); return; }
+    if (n >= MAX_BATCHES || Date.now() > deadline - 3000) {
+      unanalyzed.push(items[0].i);
+      budgetSkips++;
+      return;
+    }
     try {
-      const out = await askJson({
+      const res = await askJson({
         system: structureSystem, user: structureUser(items), schema,
         maxTokens: 2000, timeoutMs: 40_000, maxAttempts: 2, deadlineAt: deadline,
       });
       const valid = new Set(items.map((b) => b.i));
-      for (const [i, code] of out.h) {
+      for (const [i, code] of res.h) {
         const role = toRole(code);
-        if (role && valid.has(i)) roles[i] = role;
+        if (role && valid.has(i)) out[i] = role;
       }
-      out.r.slice(0, 3).forEach((r) => recs.add(r));
+      res.r.slice(0, 3).forEach((r) => recs.add(r));
     } catch (e) {
       unanalyzed.push(items[0].i);
-      console.error("[classifyParagraphs] batch gagal:", e instanceof Error ? e.message : e);
+      failures++;
+      console.error("[classifyNodes] batch gagal:", e instanceof Error ? e.message : e);
     }
   });
 
@@ -92,12 +117,20 @@ export async function classifyParagraphs(paragraphs: string[]) {
     const first = Math.min(...unanalyzed);
     let heading = "awal dokumen";
     for (let k = first - 1; k >= 0; k--) {
-      if (roles[k] === "chapter" || roles[k] === "section") { heading = `"${paragraphs[k].slice(0, 60)}"`; break; }
+      const r = roles[k];
+      if (r === "chapter" || r === "chapter_label" || r === "section") {
+        heading = `"${signals[k].text.slice(0, 60)}"`;
+        break;
+      }
     }
+    const cause = failures && !budgetSkips ? "layanan AI tidak dapat dihubungi"
+      : budgetSkips && !failures ? "batas waktu/token"
+      : "batas waktu/token dan kegagalan layanan AI";
     notices.push(
-      `AI belum menganalisis ${unanalyzed.length} bagian dokumen karena batas waktu/token, dimulai dari sekitar ${heading} (paragraf ke-${first + 1}). ` +
-      `Judul bernomor tetap dikenali aturan; sisanya ditampilkan apa adanya tanpa penyesuaian heading. Font, spasi, dan margin tetap diterapkan.`,
+      `AI belum menganalisis ${unanalyzed.length} bagian dokumen karena ${cause}, dimulai dari sekitar ${heading} (paragraf ke-${first + 1}). ` +
+      `Judul bernomor tetap dikenali aturan, dan struktur dokumen asli tetap dipertahankan. Font, spasi, margin, tabel, dan gambar tetap diproses seperti biasa.`,
     );
   }
-  return { roles, recommendations: [...recs].slice(0, 8), notices };
+
+  return { roles: out, recommendations: [...recs].slice(0, 8), notices };
 }
