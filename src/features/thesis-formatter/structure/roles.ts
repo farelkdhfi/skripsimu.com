@@ -102,7 +102,7 @@ const PAGE_NUM_TAIL = /(\.{2,}|\u2026|\t|\s{2,})\s*[\divxlcdm]+\s*$/i;
 const SECTION_RE = /^(\d+)\.(\d+)\.?\s+\S/;
 const SUBSECTION_RE = /^(\d+)\.(\d+)\.(\d+)\.?\s+\S/;
 const ALPHA_SECTION_RE = /^[A-Z]\.\s+\S/;
-const CAPTION_RE = /^(gambar|figure|grafik|bagan|diagram|tabel|table)\s*\.?\s*\d+(?:[.\-]\d+)*\s*[.:]?\s*/i;
+const CAPTION_RE = /^(gambar|figure|grafik|bagan|diagram|tabel|table)\s*\.?\s*(?:[A-Za-z]{1,2}[.\-]?)?\d+(?:[.\-]\d+)*\s*[.:]?\s*/i;
 
 /**
  * Keterangan gambar/tabel memakai Title Case setelah nomornya

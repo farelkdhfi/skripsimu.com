@@ -298,24 +298,29 @@ export async function patchStyles(zip: JSZip, font: string, halfPoints: number, 
         }
     }
 
-      if (usableWidth) {
-    const upsert = (src: string, id: string, block: string) =>
-      new RegExp(`w:styleId="${id}"`).test(src)
-        ? replaceStyle(src, id, () => block)
-        : src.replace(/<\/w:styles>\s*$/, `${block}</w:styles>`);
-    const rpr = `<w:rPr>${fontsXml}${sizeXml}${sizeCsXml}</w:rPr>`;
-    const toc = (lvl: number, left: number) =>
-      `<w:style w:type="paragraph" w:styleId="TOC${lvl}"><w:name w:val="toc ${lvl}"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:uiPriority w:val="39"/><w:unhideWhenUsed/>` +
-      `<w:pPr><w:tabs><w:tab w:val="right" w:leader="dot" w:pos="${usableWidth}"/></w:tabs><w:spacing w:before="0" w:after="60" w:line="240" w:lineRule="auto"/><w:ind w:left="${left}" w:right="0" w:firstLine="0"/><w:jc w:val="left"/></w:pPr>${rpr}</w:style>`;
-    xml = upsert(xml, "TOC1", toc(1, 0));
-    xml = upsert(xml, "TOC2", toc(2, 567));
-    xml = upsert(xml, "TOC3", toc(3, 1134));
-    // Judul bab dua baris ("BAB I" + "PENDAHULUAN"): bukan heading agar tidak
-    // muncul dua kali di daftar isi; entrinya lewat penanda TC.
-    xml = upsert(xml, "JudulBab",
-      `<w:style w:type="paragraph" w:customStyle="1" w:styleId="JudulBab"><w:name w:val="Judul Bab"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/>` +
-      `<w:pPr><w:keepNext/><w:keepLines/><w:jc w:val="center"/></w:pPr><w:rPr>${fontsXml}<w:b/><w:bCs/>${sizeXml}${sizeCsXml}</w:rPr></w:style>`);
-  }
+    if (usableWidth) {
+        const upsert = (src: string, id: string, block: string) =>
+            new RegExp(`w:styleId="${id}"`).test(src)
+                ? replaceStyle(src, id, () => block)
+                : src.replace(/<\/w:styles>\s*$/, `${block}</w:styles>`);
+        const rpr = `<w:rPr>${fontsXml}${sizeXml}${sizeCsXml}</w:rPr>`;
+        const toc = (lvl: number, left: number) =>
+            `<w:style w:type="paragraph" w:styleId="TOC${lvl}"><w:name w:val="toc ${lvl}"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:uiPriority w:val="39"/><w:unhideWhenUsed/>` +
+            `<w:pPr><w:tabs><w:tab w:val="right" w:leader="dot" w:pos="${usableWidth}"/></w:tabs><w:spacing w:before="0" w:after="60" w:line="240" w:lineRule="auto"/><w:ind w:left="${left}" w:right="0" w:firstLine="0"/><w:jc w:val="left"/></w:pPr>${rpr}</w:style>`;
+        xml = upsert(xml, "TOC1", toc(1, 0));
+        xml = upsert(xml, "TOC2", toc(2, 567));
+        xml = upsert(xml, "TOC3", toc(3, 1134));
+        // Judul bab dua baris ("BAB I" + "PENDAHULUAN"): bukan heading agar tidak
+        // muncul dua kali di daftar isi; entrinya lewat penanda TC.
+        xml = upsert(xml, "JudulBab",
+            `<w:style w:type="paragraph" w:customStyle="1" w:styleId="JudulBab"><w:name w:val="Judul Bab"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/>` +
+            `<w:pPr><w:keepNext/><w:keepLines/><w:jc w:val="center"/></w:pPr><w:rPr>${fontsXml}<w:b/><w:bCs/>${sizeXml}${sizeCsXml}</w:rPr></w:style>`);
+
+        xml = upsert(xml, "Caption",
+            `<w:style w:type="paragraph" w:styleId="Caption"><w:name w:val="caption"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:uiPriority w:val="35"/><w:unhideWhenUsed/><w:qFormat/>` +
+            `<w:pPr><w:keepNext/><w:spacing w:before="240" w:after="60" w:line="240" w:lineRule="auto"/><w:ind w:left="0" w:firstLine="0"/><w:jc w:val="left"/></w:pPr>` +
+            `<w:rPr>${fontsXml}<w:color w:val="000000"/><w:sz w:val="${Math.max(20, halfPoints - 2)}"/><w:szCs w:val="${Math.max(20, halfPoints - 2)}"/></w:rPr></w:style>`);
+    }
 
     zip.file(path, xml);
 }

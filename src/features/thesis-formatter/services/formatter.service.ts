@@ -95,7 +95,8 @@ async function formatFromDocx(file: File, c: FormatConfig): Promise<FormatResult
     result.lists ? `${result.lists} butir daftar ketikan diubah menjadi numbering/bullet otomatis Word` : "",
     result.portraitConverted ? `${result.portraitConverted} section tabel landscape dikembalikan ke portrait karena tabelnya muat` : "",
     result.signatures.blocks ? `${result.signatures.blocks} blok tanda tangan dirapikan menjadi tabel tanpa border dengan ruang tanda tangan` : "",
-    result.captions.titled ? `${result.captions.titled} keterangan tabel dirapikan (rata kiri di atas tabel, huruf awal kapital, tidak tebal)` : "",
+    result.captions.numbered ? `${result.captions.numbered} keterangan tabel dinomori ulang berurutan per bab (caption Word: style Caption + nomor otomatis)` : "",
+    result.captions.refsUpdated ? `${result.captions.refsUpdated} rujukan tabel di dalam teks disesuaikan dengan nomor baru` : "",
     result.captions.notes ? `${result.captions.notes} baris catatan di bawah tabel diatur 10 pt` : "",
     result.headings.renumbered ? `${result.headings.renumbered} nomor bab/subbab yang tidak konsisten diperbaiki (mis. "C." → "1.3", "BAB 2" → "BAB II")` : "",
     result.headings.relevelled ? `${result.headings.relevelled} judul dipindah ke tingkat yang benar (subbab/anak subbab)` : "",
@@ -115,7 +116,7 @@ async function formatFromDocx(file: File, c: FormatConfig): Promise<FormatResult
     recommendations: [
       ...ai.recommendations,
       `Format sitasi ${c.citationStyle}: periksa kesesuaian sitasi dan daftar pustaka secara manual, isi tidak diubah otomatis.`,
-      "Saat membuka file di Word, pilih \"Yes\" untuk memperbarui field agar nomor halaman daftar isi/tabel/gambar benar dan bisa diklik. Bisa juga Ctrl+A lalu F9.",
+      "Saat membuka file di Word, pilih \"Yes\" untuk memperbarui field agar nomor halaman daftar isi/tabel/gambar benar dan bisa diklik. Bisa juga Ctrl+A lalu F9.", "Rujukan tabel di teks diperbarui sebagai teks biasa. Bila nanti menambah tabel baru di Word, gunakan References → Insert Caption agar penomorannya tetap berurutan.",
     ],
   };
 }

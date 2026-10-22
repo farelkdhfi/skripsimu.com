@@ -26,6 +26,8 @@ import type { FormatConfig } from "../schemas/format-config";
 import { layoutCover } from "./cover";
 import { buildSignatureTables, type SigReport } from "./signature";
 import { normalizeHeadings, type HeadingReport } from "./headings";
+import { promoteUnnumberedCaptions } from "./tables";
+import { refreshListCaches } from "./toc-cache";
 
 export type TransformResult = {
     buffer: Buffer;
@@ -182,8 +184,10 @@ export async function transformDocx(
     const stylesXml = await zip.file("word/styles.xml")?.async("string");
     if (stylesXml) markStyleNumbering(nodes, stylesXml);
     const outline = buildOutline(nodes, opts.aiRoles ?? []);
+    const promoted = promoteUnnumberedCaptions(nodes, outline);
     // Catatan tabel dideteksi dari dokumen asli, sebelum daftar & ukuran font diubah.
     const tableNotes = detectTableNotes(nodes, outline, Math.round(config.fontSize * 2));
+    for (const id of promoted) tableNotes.delete(id);
     const rules = createThesisRules(config);
     const notes: string[] = [];
 
@@ -245,6 +249,12 @@ export async function transformDocx(
 
     const captions = arrangeTableCaptions(model, nodes, outline, rules, tableNotes);
     if (captions.moved) notes.push(`${captions.moved} keterangan tabel dipindah ke atas tabelnya.`);
+    if (captions.refsUnresolved) {
+        notes.push(`${captions.refsUnresolved} rujukan tabel di teks menunjuk nomor yang tidak ada di dokumen dan dibiarkan apa adanya. Periksa manual.`);
+    }
+    if (captions.uncaptioned.length) {
+        notes.push(`${captions.uncaptioned.length} tabel di bab belum memiliki judul: ${captions.uncaptioned.slice(0, 5).join("; ")}. Tambahkan judulnya di atas tabel. Formatter tidak membuat judul sendiri.`);
+    }
 
     /* -------- daftar isi/tabel/gambar/lampiran → field TOC -------- */
 
@@ -379,6 +389,10 @@ export async function transformDocx(
         collapseEmptyPages(model, report, headingIds);
     }
 
+    const listCache = refreshListCaches(model, {
+        dropTc: captions.appendix,
+    });
+
     /* -------- tulis kembali paket -------- */
 
     const newXml = serializeDocument(model);
@@ -391,7 +405,12 @@ export async function transformDocx(
     const after = fingerprint(newXml);
     const issues = verify(before, after, {
         unorderedPrefix: cover.reordered ? cover.coverLines : 0,
-        regions: [...headings.regions, ...captions.regions, ...signatures.regions],
+        regions: [
+            ...headings.regions,
+            ...captions.regions,
+            ...signatures.regions,
+            ...listCache.regions,
+        ],
         added: signatures.added,
     });
 
