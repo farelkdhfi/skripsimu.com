@@ -2,8 +2,10 @@
  * Merapikan judul bab/subbab:
  *  - nomor subbab yang salah ketik (C. di antara 1.2 dan 1.4 → 1.3), hanya bila
  *    nomor tetangga memastikan slotnya; level ikut dikoreksi (2.1.2 = Heading 3)
- *  - titik di akhir nomor dibuang ("1.4." → "1.4")
+ *  - nomor ganda/mundur ("2.1.3" dua kali → 2.1.4) bila nomor sesudahnya tidak bertentangan
+ *  - tanda setelah nomor dibuang ("1.4." / "1.4)" → "1.4")
  *  - awalan bab angka → romawi ("BAB 2" → "BAB II")
+ *  - judul bab satu baris ("BAB II. TINJAUAN PUSTAKA") → dua baris ("BAB II" ↵ "TINJAUAN PUSTAKA")
  *  - judul subbab Title Case (akronim dipertahankan)
  */
 import { escapeXml } from "./xml";
@@ -15,11 +17,20 @@ import type { ParaNode, TableNode } from "./document-model";
 import type { Outline } from "../structure/outline";
 import type { FormatRules } from "../rules/format-rules";
 
-export type HeadingReport = { renumbered: number; retitled: number; relevelled: number; regions: VerifyRegion[] };
+export type HeadingReport = {
+  renumbered: number; retitled: number; relevelled: number;
+  /** Judul bab satu baris yang dipecah jadi dua baris. */
+  chaptersSplit: number;
+  regions: VerifyRegion[];
+};
 
-const SEC_PREFIX_RE = /^[ \t\u00a0]*(\d+(?:\.\d+){1,3}|[A-Z])\.?[ \t\u00a0]+/;
-const SEC_PREFIX_TEXT_RE = /^\s*(\d+(?:\.\d+){1,3}|[A-Z])\.?\s+/;
+const SEC_PREFIX_RE = /^[ \t\u00a0]*(\d+(?:\.\d+){1,3}|[A-Z])[.)]?[ \t\u00a0]+/;
+const SEC_PREFIX_TEXT_RE = /^\s*(\d+(?:\.\d+){1,3}|[A-Z])[.)]?\s+/;
 const CHAPTER_RAW_RE = /^[ \t\u00a0]*bab[ \t\u00a0]+([ivxlcdm]+|\d+)\b/i;
+/** "BAB II. ", "BAB 3 : ", "Bab IV – " (label + pemisah sebelum judul). */
+const CHAPTER_LINE_RE = /^[ \t\u00a0]*bab[ \t\u00a0]+([ivxlcdm]+|\d+)[ \t\u00a0]*[.:\-\u2013\u2014]?[ \t\u00a0]*/i;
+const CHAPTER_TEXT_RE = /^\s*bab\s+([ivxlcdm]+|\d+)\s*[.:\-\u2013\u2014]?\s*/i;
+const SOFT_BREAK_RE = /<w:br(?![^>]*w:type="page")[^>]*\/>|<w:cr\s*\/>/;
 
 function toRoman(n: number): string {
   const map: [number, string][] = [[10, "X"], [9, "IX"], [5, "V"], [4, "IV"], [1, "I"]];
@@ -41,6 +52,16 @@ function setPrefix(p: ParaNode, oldLen: number, prefix: string) {
   p.xml = xml.replace(/<w:t(\s[^>]*)?>/, `<w:t xml:space="preserve">${escapeXml(prefix)}`);
 }
 
+/** Buang awalan (oldLen karakter), sisipkan run "label" + ganti baris di awal paragraf. */
+function setLabelLine(p: ParaNode, oldLen: number, label: string) {
+  let xml = removeLeading(p.xml, oldLen);
+  const rPr = /<w:r(?:\s[^>]*)?>\s*(<w:rPr>[\s\S]*?<\/w:rPr>)/.exec(xml)?.[1] ?? "";
+  const e = xml.indexOf("</w:pPr>");
+  const at = e !== -1 ? e + 8 : xml.indexOf(">") + 1;
+  xml = xml.slice(0, at) + `<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(label)}</w:t><w:br/></w:r>` + xml.slice(at);
+  p.xml = xml;
+}
+
 type Entry = { i: number; p: ParaNode; level: 2 | 3; nums: number[] | null; lettered: boolean; dotted: boolean; changed: boolean };
 
 export function normalizeHeadings(
@@ -50,7 +71,7 @@ export function normalizeHeadings(
   rep: ApplyReport,
   opts: { titleCase: boolean },
 ): HeadingReport {
-  const out: HeadingReport = { renumbered: 0, retitled: 0, relevelled: 0, regions: [] };
+  const out: HeadingReport = { renumbered: 0, retitled: 0, relevelled: 0, chaptersSplit: 0, regions: [] };
   let chapterNo = 0;
   let entries: Entry[] = [];
 
@@ -96,6 +117,27 @@ export function normalizeHeadings(
       k = e2;
     }
 
+    // Nomor ganda atau mundur di bawah induk yang sama ("2.1.3" dua kali) → nomor
+    // berikutnya, hanya bila saudara sesudahnya tidak bertentangan (2.1.5 → slot 2.1.4 kosong).
+    const lastOf = new Map<string, number>();
+    entries.forEach((e, idx) => {
+      if (!e.nums) return;
+      const parent = e.nums.slice(0, -1).join(".");
+      const own = e.nums[e.nums.length - 1];
+      const last = lastOf.get(parent);
+      if (last !== undefined && own <= last) {
+        const want = last + 1;
+        const next = entries.slice(idx + 1).find((x) =>
+          x.nums && x.nums.length === e.nums!.length && x.nums.slice(0, -1).join(".") === parent);
+        const nextOwn = next?.nums?.[next.nums.length - 1];
+        if (nextOwn === undefined || nextOwn > want) {
+          e.nums = [...e.nums.slice(0, -1), want];
+          e.changed = true;
+        }
+      }
+      lastOf.set(parent, e.nums[e.nums.length - 1]);
+    });
+
     for (const e of entries) {
       const p = e.p;
       const before = { line: paragraphLine(p.xml), rest: p.text.replace(SEC_PREFIX_TEXT_RE, "") };
@@ -132,18 +174,31 @@ export function normalizeHeadings(
 
     if (it.role === "chapter_label" || (it.role === "chapter" && !it.continuesChapterLabel)) {
       resolve();
-      const m = CHAPTER_RAW_RE.exec(leadingRaw(n.xml, 40));
+      const raw = leadingRaw(n.xml, 60);
+      const m = CHAPTER_RAW_RE.exec(raw);
       if (!m) { chapterNo++; return; }
       const arabic = /^\d+$/.test(m[1]);
       chapterNo = arabic ? Number(m[1]) : fromRoman(m[1]) || chapterNo + 1;
-      if (arabic) {
-        const beforeLine = paragraphLine(n.xml);
+      const label = `BAB ${toRoman(chapterNo)}`;
+      const title = n.text.replace(CHAPTER_TEXT_RE, "").trim();
+      // Judul bab satu baris → "BAB II" ↵ "TINJAUAN PUSTAKA" (seragam dengan bab dua baris).
+      const oneLine = it.role === "chapter" && !it.pairedTitleNext && Boolean(title) && !SOFT_BREAK_RE.test(n.xml);
+      if (!arabic && !oneLine) return;
+
+      const beforeLine = paragraphLine(n.xml);
+      if (oneLine) {
+        const lm = CHAPTER_LINE_RE.exec(raw);
+        if (!lm) return;
+        setLabelLine(n, lm[0].length, label);
+        n.text = `${label} ${title}`;
+        out.chaptersSplit++;
+      } else {
         const beforeRest = n.text.replace(/^\s*bab\s+\d+/i, "");
-        setPrefix(n, m[0].length, `BAB ${toRoman(chapterNo)}`);
-        n.text = `BAB ${toRoman(chapterNo)}${beforeRest}`;
+        setPrefix(n, m[0].length, label);
+        n.text = `${label}${beforeRest}`;
         out.renumbered++;
-        out.regions.push({ beforeLines: [beforeLine].filter(Boolean), afterLines: [paragraphLine(n.xml)].filter(Boolean), beforeText: beforeRest, afterText: beforeRest });
       }
+      out.regions.push({ beforeLines: [beforeLine].filter(Boolean), afterLines: [paragraphLine(n.xml)].filter(Boolean), beforeText: title, afterText: title });
       return;
     }
 
@@ -156,7 +211,7 @@ export function normalizeHeadings(
     entries.push({
       i, p: n, lettered, nums, changed: false,
       level: nums ? (nums.length >= 3 ? 3 : 2) : it.role === "subsection" ? 3 : 2,
-      dotted: /\d\.[ \t\u00a0]+$/.test(m[0]),
+      dotted: /[.)][ \t\u00a0]+$/.test(m[0]),
     });
   });
   resolve();

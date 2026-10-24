@@ -1,17 +1,17 @@
 /**
- * Tata letak halaman sampul, disusun ke urutan baku skripsi:
+ * Tata letak halaman sampul (cadangan bila template General tidak bisa dipakai),
+ * disusun ke urutan baku:
  *
- *   SKRIPSI
- *   Judul topik                         ← atas
- *   Diajukan sebagai salah satu syarat…
- *
- *   [logo]
- *   Oleh: / Nama / NIM                  ← tengah halaman
- *
+ *   Judul topik                                     ← atas
+ *   ── ruang ──
+ *   SKRIPSI / USULAN PENELITIAN                     ┐
+ *   Diajukan sebagai salah satu syarat…             │ blok tengah
+ *   Oleh: / Nama / NIM / Pembimbing                 │
+ *   [logo]                                          ┘
+ *   ── ruang ──
  *   Prodi / Fakultas / Universitas / Kota / Tahun   ← frame di margin bawah
  *
- * Paragraf sampul DIPINDAH ke urutan ini (satu-satunya tempat formatter
- * mengubah urutan); teksnya tidak diubah. Paragraf kosong pengatur jarak dibuang.
+ * Paragraf sampul DIPINDAH ke urutan ini; teksnya tidak diubah.
  */
 import { PPR_ORDER, RPR_ORDER, spacing, withProps } from "./xml";
 import type { DocModel, ParaNode, TableNode } from "./document-model";
@@ -24,11 +24,11 @@ export type CoverReport = { pages: number; reordered: boolean; coverLines: numbe
 
 const INSTITUTION_RE = /(program\s+studi|prodi|jurusan|departemen|fakultas|universitas|institut|sekolah\s+tinggi|politeknik|akademi|kementerian)/i;
 const YEAR_RE = /^\d{4}$/;
-const NOT_INSTITUTION_RE = /(oleh|nim\b|npm\b|nrp\b|skripsi|tesis|disusun|diajukan|:)/i;
-const DOC_TYPE_RE = /^(skripsi|tesis|disertasi|tugas\s+akhir|laporan\s+akhir|proposal(\s+(skripsi|penelitian))?)$/i;
-const PURPOSE_RE = /(diajukan|syarat|guna\s+memperoleh|untuk\s+memperoleh|memperoleh\s+gelar)/i;
-const PURPOSE_CONT_RE = /^(memperoleh|gelar|sarjana|magister|doktor|pada\s+program|\()/i;
-const OLEH_RE = /^((disusun|ditulis|dibuat)\s+)?oleh\s*:?$/i;
+const NOT_INSTITUTION_RE = /(oleh|nim\b|npm\b|nrp\b|skripsi|tesis|disusun|diajukan|pembimbing|:)/i;
+const DOC_TYPE_RE = /^\(?((usulan|proposal|penelitian|skripsi|tesis|thesis|disertasi|tugas|akhir|seminar|hasil|laporan)[\s\/\-]*)+\)?$/i;
+const PURPOSE_RE = /(diajukan\s+(?!oleh)|syarat|guna\s+memperoleh|untuk\s+memperoleh|memperoleh\s+gelar|untuk\s+memenuhi|disusun\s+untuk)/i;
+const PURPOSE_CONT_RE = /^(memperoleh|gelar|sarjana|magister|doktor|pada\s+program|sebagai|\()/i;
+const OLEH_RE = /^((disusun|ditulis|dibuat|diajukan)\s+)?oleh\s*:?$/i;
 const ID_RE = /^(nim|npm|nrp|no\.?\s*bp|stambuk|nomor\s+induk)\b/i;
 const PBB_RE = /<w:pageBreakBefore(?:\s+w:val="(?:1|true|on)")?\s*\/>/;
 const EMU_PER_TWIP = 635;
@@ -67,7 +67,7 @@ function setCaps(p: ParaNode) {
 
 function setPara(p: ParaNode, before: number, after: number, frame?: string) {
     p.xml = withProps(p.xml, "w:pPr", {
-        "w:spacing": spacing({ before: Math.round(before), after: Math.round(after), line: 240, rule: "auto" }),
+        "w:spacing": spacing({ before: Math.max(0, Math.round(before)), after: Math.max(0, Math.round(after)), line: 240, rule: "auto" }),
         "w:pageBreakBefore": null,
         "w:framePr": frame ?? null,
     }, PPR_ORDER);
@@ -137,7 +137,6 @@ export function layoutCover(
 
         const isBoundary = (p: ParaNode) => p.hasPageBreak || p.hasSectPr || p.hasField || /<w:bookmarkStart/.test(p.xml);
         const tails = page.filter(isBoundary);
-        // Paragraf batas (section/page break) harus tetap di akhir halaman dan tanpa teks.
         if (tails.some((p) => p.text.trim() || p.hasDrawing)) continue;
         const content = page.filter((p) => !isBoundary(p) && (p.text.trim() || p.hasDrawing));
         if (!content.length) continue;
@@ -185,7 +184,7 @@ export function layoutCover(
             }
         }
 
-        const ordered = [...groups.doc, ...groups.title, ...groups.purpose, ...groups.logo, ...groups.author, ...groups.inst];
+        const ordered = [...groups.title, ...groups.doc, ...groups.purpose, ...groups.author, ...groups.logo, ...groups.inst];
 
         // Susun ulang di body (hanya bila halaman ini berurutan di tingkat atas).
         const idxs = page.map((p) => model.body.indexOf(p));
@@ -204,33 +203,48 @@ export function layoutCover(
             if (s.institutionCaps) setCaps(p);
         }
 
-        // Jarak: satu baris antarkelompok atas, rapat di dalam kelompok.
+        // Jenis dokumen selalu 12 pt.
+        for (const p of groups.doc) setSize(p, 24);
+
+        // Jarak dasar: rapat di dalam kelompok.
         const gap = s.textHalf * 10;
-        const lastOf = (list: ParaNode[]) => list[list.length - 1];
-        for (const p of ordered) if (!p.hasDrawing && !inst.has(p)) setPara(p, 0, 0);
-        if (groups.doc.length && (groups.title.length || groups.purpose.length)) setPara(lastOf(groups.doc), 0, gap);
-        if (groups.title.length && groups.purpose.length) setPara(lastOf(groups.title), 0, gap);
-        const oleh = groups.author.find((p) => OLEH_RE.test(p.text.trim()));
-        if (oleh) setPara(oleh, 0, Math.round(gap / 2));
+        for (const p of ordered) if (!inst.has(p)) setPara(p, 0, 0);
+        groups.logo.forEach((p) => shrinkLogo(p, Math.round(s.logoMaxTwips * 1.25)));
 
         // Institusi → frame di margin bawah.
         const frame = `<w:framePr w:w="${Math.round(m.width)}" w:wrap="notBeside" w:vAnchor="margin" w:hAnchor="margin" w:xAlign="center" w:yAlign="bottom"/>`;
         groups.inst.forEach((p) => setPara(p, 0, 0, frame));
 
-        // Logo + penulis = satu kelompok di tengah halaman.
-        groups.logo.forEach((p) => { shrinkLogo(p, s.logoMaxTwips); setPara(p, 0, 0); });
-        const middle = [...groups.logo, ...groups.author];
+        // Blok tengah di antara judul dan institusi; ruang di atas & di bawah logo seimbang.
+        const middle = [...groups.doc, ...groups.purpose, ...groups.author, ...groups.logo];
         if (middle.length) {
-            if (groups.logo.length && groups.author.length) setPara(lastOf(groups.logo), 0, gap);
             const h = (list: ParaNode[]) => list.reduce((sum, p) => sum + heightOf(p, m), 0);
-            const A = h([...groups.doc, ...groups.title, ...groups.purpose]);
-            const G = h(middle);
+            const A = h(groups.title);
+            const G = h(middle) + (groups.doc.length && groups.purpose.length ? gap : 0);
             const D = h(groups.inst) + h(tails);
-            const room = m.height - D - gap - A - G;
-            const gapMid = Math.max(gap, Math.min((m.height - G) / 2 - A, room));
-            const first = middle[0];
-            const after = num(attrs(first.xml, "w:spacing"), "w:after") ?? 0;
-            setPara(first, gapMid, after);
+            const hasLogo = groups.logo.length > 0;
+            const weight = {
+                top: groups.title.length ? 1 : 0,
+                author: groups.author.length && middle[0] !== groups.author[0] ? 0.7 : 0,
+                logo: hasLogo && middle[0] !== groups.logo[0] ? 1 : 0,
+                bottom: 1,
+            };
+            const minGap = {
+                top: weight.top ? 360 : 0,
+                author: weight.author ? 240 : 0,
+                logo: weight.logo ? 360 : 0,
+                bottom: 480,
+            };
+            const minSum = minGap.top + minGap.author + minGap.logo + minGap.bottom;
+            const wSum = weight.top + weight.author + weight.logo + weight.bottom;
+            const room = Math.max(0, m.height - A - G - D - 60);
+            const k = room < minSum ? room / minSum : 1;
+            const extra = Math.max(0, room - minSum);
+            const gapOf = (key: keyof typeof weight) => minGap[key] * k + (extra * weight[key]) / wSum;
+            setPara(middle[0], gapOf("top"), 0);
+            if (groups.doc.length && groups.purpose.length) setPara(groups.purpose[0], gap, 0);
+            if (weight.author) setPara(groups.author[0], gapOf("author"), 0);
+            if (weight.logo) setPara(groups.logo[0], gapOf("logo"), 0);
         }
 
         rep.pages++;

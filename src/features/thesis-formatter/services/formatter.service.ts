@@ -6,6 +6,7 @@ import { buildOutline, outlineStats } from "../structure/outline";
 import type { Signals } from "../structure/roles";
 import type { FormatConfig } from "../schemas/format-config";
 import type { DocStats, FormatResult, IntegrityCheck } from "../types";
+import { extractCoverAI } from "./cover-ai.service";
 
 const EMPTY_STATS: DocStats = {
   chapters: 0, sections: 0, subsections: 0, figures: 0, figureCaptions: 0,
@@ -51,15 +52,15 @@ async function formatFromDocx(file: File, c: FormatConfig): Promise<FormatResult
   );
 
   const ai = await classifyNodes(signals);
-  const result = await transformDocx(input, c, { aiRoles: ai.roles });
+  const result = await transformDocx(input, c, { aiRoles: ai.roles, coverAI: extractCoverAI });
 
   const failed = (prefix: string) => result.issues.some((i) => i.message.startsWith(prefix));
   const sig = result.signatures.added;
   const integrity: IntegrityCheck[] = [
     { label: "Gambar & objek", before: result.before.drawings, after: result.after.drawings, ok: !failed("") || result.after.drawings >= result.before.drawings },
-    { label: "Tabel", before: result.before.tables, after: result.after.tables - sig.tables, ok: !failed("Jumlah tabel") },
-    { label: "Baris tabel", before: result.before.rows, after: result.after.rows - sig.rows, ok: !failed("Jumlah baris") },
-    { label: "Sel tabel", before: result.before.cells, after: result.after.cells - sig.cells, ok: !failed("Jumlah sel") },
+    { label: "Tabel", before: result.before.tables, after: result.after.tables, ok: result.after.tables === result.before.tables - result.coverRemoved.tables },
+    { label: "Baris tabel", before: result.before.rows, after: result.after.rows, ok: result.after.rows === result.before.rows - result.coverRemoved.rows },
+    { label: "Sel tabel", before: result.before.cells, after: result.after.cells, ok: result.after.cells === result.before.cells - result.coverRemoved.cells },
     { label: "Teks dokumen", before: `${result.before.text.length} karakter`, after: `${result.after.text.length} karakter`, ok: !failed("Teks dokumen") },
   ];
 
@@ -95,9 +96,11 @@ async function formatFromDocx(file: File, c: FormatConfig): Promise<FormatResult
     result.lists ? `${result.lists} butir daftar ketikan diubah menjadi numbering/bullet otomatis Word` : "",
     result.portraitConverted ? `${result.portraitConverted} section tabel landscape dikembalikan ke portrait karena tabelnya muat` : "",
     result.signatures.blocks ? `${result.signatures.blocks} blok tanda tangan dirapikan menjadi tabel tanpa border dengan ruang tanda tangan` : "",
-    result.captions.numbered ? `${result.captions.numbered} keterangan tabel dinomori ulang berurutan per bab (caption Word: style Caption + nomor otomatis)` : "",
-    result.captions.refsUpdated ? `${result.captions.refsUpdated} rujukan tabel di dalam teks disesuaikan dengan nomor baru` : "",
-    result.captions.notes ? `${result.captions.notes} baris catatan di bawah tabel diatur 10 pt` : "",
+    result.captions.table.numbered ? `${result.captions.table.numbered} keterangan tabel dinomori ulang per bab (caption Word: style Caption + nomor otomatis)` : "",
+    result.captions.figure.numbered ? `${result.captions.figure.numbered} keterangan gambar dinomori ulang per bab, diletakkan di bawah gambar` : "",
+    result.captions.table.refsUpdated + result.captions.figure.refsUpdated
+      ? `${result.captions.table.refsUpdated + result.captions.figure.refsUpdated} rujukan tabel/gambar di dalam teks disesuaikan dengan nomor baru` : "",
+    result.captions.notes ? `${result.captions.notes} catatan di bawah tabel diformat 10 pt` : "",
     result.headings.renumbered ? `${result.headings.renumbered} nomor bab/subbab yang tidak konsisten diperbaiki (mis. "C." → "1.3", "BAB 2" → "BAB II")` : "",
     result.headings.relevelled ? `${result.headings.relevelled} judul dipindah ke tingkat yang benar (subbab/anak subbab)` : "",
     result.headings.retitled ? `${result.headings.retitled} judul subbab diseragamkan huruf awal kapital` : "",
@@ -115,7 +118,9 @@ async function formatFromDocx(file: File, c: FormatConfig): Promise<FormatResult
     validation,
     recommendations: [
       ...ai.recommendations,
-      `Format sitasi ${c.citationStyle}: periksa kesesuaian sitasi dan daftar pustaka secara manual, isi tidak diubah otomatis.`,
+      c.citationStyle === "APA" || c.citationStyle === "Harvard"
+        ? `Daftar pustaka diurutkan sesuai abjad (${c.citationStyle}). Isi tiap entri tidak diubah; periksa entri yang dilaporkan tidak sesuai gaya.`
+        : `Gaya ${c.citationStyle}: urutan daftar pustaka mengikuti nomor sitasi di teks sehingga tidak diurutkan sesuai abjad.`,
       "Saat membuka file di Word, pilih \"Yes\" untuk memperbarui field agar nomor halaman daftar isi/tabel/gambar benar dan bisa diklik. Bisa juga Ctrl+A lalu F9.", "Rujukan tabel di teks diperbarui sebagai teks biasa. Bila nanti menambah tabel baru di Word, gunakan References → Insert Caption agar penomorannya tetap berurutan.",
     ],
   };

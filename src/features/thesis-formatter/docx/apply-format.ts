@@ -279,7 +279,7 @@ export function applyFormat(
   model: DocModel,
   outline: Outline,
   rules: FormatRules,
-  opts: { cleanupBlankPages: boolean; normalizeTables: boolean },
+  opts: { cleanupBlankPages: boolean; normalizeTables: boolean; skipTables?: Set<number> },
 ): ApplyReport {
   const rep: ApplyReport = {
     paragraphsFormatted: 0, runsFormatted: 0, tablesNormalized: 0,
@@ -300,7 +300,8 @@ export function applyFormat(
     const { role, zone } = item;
 
     if (node.kind === "table") {
-      if (opts.normalizeTables) {
+      // Tabel tanda tangan bukan tabel data: dirapikan oleh modul tanda tangan.
+      if (opts.normalizeTables && !opts.skipTables?.has(node.id)) {
         const texts = node.rows.map((r) => r.cells.map((c) => cellParagraphs(c).map((p) => p.text).join(" ").trim()));
         normalizeTable(node, { fmt: tableFmt, rules, usableWidth, texts, rep }, rep);
       }

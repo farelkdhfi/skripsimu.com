@@ -86,11 +86,12 @@ export const LIST_HEADING_RE = new RegExp(
 export const REFERENCE_HEADING_RE = new RegExp(
   "^(?:daftar\\s+(?:pustaka|referensi|rujukan)|referensi|bibliografi|bibliography|references)" + SUFFIX + "$", "i",
 );
-export const APPENDIX_HEADING_RE = /^(lampiran|appendix|appendices)\b/i;
-export const CHAPTER_RE = /^bab\s+([ivxlcdm]+|\d+)\b/i;
+/** "Lampiran : 1 (satu) berkas" (baris surat) bukan judul lampiran → titik dua langsung setelah kata ditolak. */
+export const APPENDIX_HEADING_RE = /^(lampiran|appendix|appendices)\b(?!\s*[:：])/i;
+export const CHAPTER_RE = /^(?:bab|chapter)\s+([ivxlcdm]+|\d+)\b/i;
 
 /** "BAB I" berdiri sendiri — judulnya ada di paragraf berikutnya. */
-export const CHAPTER_LABEL_ONLY_RE = /^bab\s+([ivxlcdm]+|\d+)\s*[.:]?\s*$/i;
+export const CHAPTER_LABEL_ONLY_RE = /^(?:bab|chapter)\s+([ivxlcdm]+|\d+)\s*[.:]?\s*$/i;
 
 const LIST_ENTRY_RE = /(\.{3,}|\u2026|\t)\s*[\divxlcdm]+\s*$/i;
 /**
@@ -99,10 +100,10 @@ const LIST_ENTRY_RE = /(\.{3,}|\u2026|\t)\s*[\divxlcdm]+\s*$/i;
  * akan membuat "BAB I" terbaca sebagai entri yang berakhir angka romawi.
  */
 const PAGE_NUM_TAIL = /(\.{2,}|\u2026|\t|\s{2,})\s*[\divxlcdm]+\s*$/i;
-const SECTION_RE = /^(\d+)\.(\d+)\.?\s+\S/;
-const SUBSECTION_RE = /^(\d+)\.(\d+)\.(\d+)\.?\s+\S/;
+const SECTION_RE = /^(\d+)\.(\d+)[.)]?\s+\S/;
+const SUBSECTION_RE = /^(\d+)\.(\d+)\.(\d+)[.)]?\s+\S/;
 const ALPHA_SECTION_RE = /^[A-Z]\.\s+\S/;
-const CAPTION_RE = /^(gambar|figure|grafik|bagan|diagram|tabel|table)\s*\.?\s*(?:[A-Za-z]{1,2}[.\-]?)?\d+(?:[.\-]\d+)*\s*[.:]?\s*/i;
+const CAPTION_RE = /^(gambar|gbr\.?|figure|fig\.?|grafik|bagan|diagram|tabel|table|tbl\.?)\s*\.?\s*(?:[A-Za-z]{1,2}[.\-]?)?\d+(?:[.\-]\d+)*\s*[.:]?\s*/i;
 
 /**
  * Keterangan gambar/tabel memakai Title Case setelah nomornya
@@ -119,7 +120,7 @@ export function captionKind(t: string): Role | null {
   if (m) {
     const rest = t.slice(m[0].length);
     if (/^[a-z]/.test(rest)) return null;
-    return /^(tabel|table)$/i.test(m[1]) ? "table_caption" : "figure_caption";
+    return /^(tabel|table|tbl\.?)$/i.test(m[1]) ? "table_caption" : "figure_caption";
   }
   const u = UNNUMBERED_CAPTION_RE.exec(t);
   if (u) return /^(tabel|table)$/i.test(u[1]) ? "table_caption" : "figure_caption";
@@ -132,6 +133,10 @@ export type Signals = {
   text: string;
   hasDrawing: boolean;
   isTable: boolean;
+  /** Paragraf ber-style keterangan (Caption, CaptionGambar, …): keterangan panjang tetap dikenali. */
+  captionStyled?: boolean;
+  /** Paragraf judul bab bernomor romawi saja ("I" ↵ "PENDAHULUAN"), dari unifyChapterHeadings. */
+  chapterHint?: boolean;
 };
 
 /**
@@ -151,7 +156,7 @@ export type LayoutHint = {
   length: number;
   frontKind: FrontKind | null;
 
-   /** Bagian dari judul bab dua baris ("BAB I" + "PENDAHULUAN"). */
+  /** Bagian dari judul bab dua baris ("BAB I" + "PENDAHULUAN"). */
   pairedChapter?: boolean;
 };
 
@@ -165,6 +170,7 @@ export function classifyByRule(s: Signals, zone: Zone, inList = false): Role | n
 
   if (s.hasDrawing) return "figure";
   if (!t) return "empty";
+  if (s.chapterHint) return "chapter";
 
   const bare = t.replace(/[:\s]+$/, "");
 
@@ -175,7 +181,7 @@ export function classifyByRule(s: Signals, zone: Zone, inList = false): Role | n
   // Di dalam halaman DAFTAR ISI/TABEL/GAMBAR, baris berakhiran nomor halaman
   // adalah entri daftar — bukan judul bab, sekalipun bunyinya sama persis.
   if (inList && PAGE_NUM_TAIL.test(t)) return "list_entry";
-  if (t.length <= 200) {
+  if (t.length <= (s.captionStyled ? 700 : 200)) {
     const caption = captionKind(t);
     if (caption) return caption;
   }
@@ -220,7 +226,7 @@ export function scanStructure(signals: Signals[]): { zones: Zone[]; inList: bool
 
     // Perpindahan zona hanya dipicu judul sungguhan, bukan barisan daftar isi.
     if (!listing && !entryLike && t.length <= 120) {
-      if (CHAPTER_RE.test(t)) zone = "main";
+      if (s.chapterHint || CHAPTER_RE.test(t)) zone = "main";
       else if (REFERENCE_HEADING_RE.test(t) && headingish(t)) zone = "back";
       else if (APPENDIX_HEADING_RE.test(t) && headingish(t) && t.length <= 60) zone = "back";
       else if (zone === "cover" && (FRONT_HEADING_RE.test(t) || LIST_HEADING_RE.test(t)) && headingish(t)) zone = "front";

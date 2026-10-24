@@ -6,7 +6,7 @@
 
 import type { ParaNode, TableNode } from "../docx/document-model";
 import {
-    LIST_MARKER_RE, classifyByRule, frontKindOf, scanStructure,
+    LIST_MARKER_RE, captionKind, classifyByRule, frontKindOf, isHeadingRole, scanStructure,
     type FrontKind, type LayoutHint, type Role, type Signals, type Zone,
 } from "./roles";
 
@@ -34,10 +34,14 @@ export type Outline = {
 
 export type OutlineInput = ParaNode | TableNode;
 
-function signalsOf(n: OutlineInput): Signals {
+function signalsOf(n: OutlineInput, chapterIds: Set<number>): Signals {
     return n.kind === "table"
         ? { text: "", hasDrawing: false, isTable: true }
-        : { text: n.text, hasDrawing: n.hasDrawing, isTable: false };
+        : {
+            text: n.text, hasDrawing: n.hasDrawing, isTable: false,
+            captionStyled: /caption|keterangan/i.test(n.styleId ?? ""),
+            chapterHint: chapterIds.has(n.id),
+        };
 }
 
 /**
@@ -45,8 +49,28 @@ function signalsOf(n: OutlineInput): Signals {
  *   tidak bisa diputuskan oleh aturan, sehingga AI tidak pernah menimpa
  *   penanda struktural yang sudah pasti.
  */
-export function buildOutline(nodes: OutlineInput[], aiRoles: (Role | null)[] = []): Outline {
-    const signals = nodes.map(signalsOf);
+
+const AI_DEGREE_RE = /,\s*(?:S|M|Dr|Ir|Drs|Dra|Prof|Ph)\.?\s?[A-Za-z]|\b(?:Dr|Prof|Ir|Drs|Dra|Hj?)\.\s/i;
+const AI_DATE_RE = /\b(januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember)\s+\d{4}\b/i;
+const AI_ID_RE = /^(nip|nidn|nik|nim|npm|nuptk)\b/i;
+
+/**
+ * Peran judul dari AI hanya diterima bila masuk akal: baris bergelar, tanggal,
+ * NIP/NIDN, baris berakhiran koma/titik dua, atau "(Nama)" bukan judul.
+ * Di luar isi (sampul/awal/lampiran), AI tidak boleh membuat bab/subbab.
+ */
+function plausibleAiHeading(text: string, role: Role, zone: Zone): boolean {
+    const t = text.replace(/\s+/g, " ").trim();
+    if (!t || t.length > 120) return false;
+    if (AI_DEGREE_RE.test(t) || AI_DATE_RE.test(t) || AI_ID_RE.test(t)) return false;
+    if (/[,:;]$/.test(t) || /^\(.*\)$/.test(t)) return false;
+    if (zone !== "main" && (role === "chapter" || role === "chapter_label" || role === "section" || role === "subsection")) return false;
+    if ((zone === "front" || zone === "cover") && (t.includes(",") || t.split(" ").length > 8)) return false;
+    return true;
+}
+
+export function buildOutline(nodes: OutlineInput[], aiRoles: (Role | null)[] = [], chapterIds: Set<number> = new Set()): Outline {
+    const signals = nodes.map((n) => signalsOf(n, chapterIds));
     const { zones, inList } = scanStructure(signals);
 
     const roles: Role[] = signals.map((s, i) => {
@@ -55,9 +79,39 @@ export function buildOutline(nodes: OutlineInput[], aiRoles: (Role | null)[] = [
         if (rule !== null && rule !== "empty") return rule;
         if (rule === "empty") return "empty";
         const ai = aiRoles[i];
-        if (ai) return ai;
+        if (ai) {
+            const fallback: Role = zones[i] === "cover" ? "cover" : "body";
+            if (isHeadingRole(ai) && !plausibleAiHeading(s.text, ai, zones[i])) return fallback;
+            // Peran sampul hanya sah di zona sampul (di luar itu membuat baris jadi rata tengah).
+            if (ai === "cover" && zones[i] !== "cover") return "body";
+            // Entri daftar isi hanya sah di dalam blok DAFTAR ISI/TABEL/GAMBAR.
+            if (ai === "list_entry" && !inList[i]) return fallback;
+            return ai;
+        }
         return zones[i] === "cover" ? "cover" : "body";
     });
+
+    // Keterangan panjang (judul + penjelasan + "Sumber: …", > 200 karakter) dikenali dari
+    // letaknya: tepat di bawah/atas gambar, atau tepat di atas/bawah tabel.
+    {
+        const blankAt = (k: number) => { const n = nodes[k]; return n.kind === "paragraph" && !n.text.trim() && !n.hasDrawing; };
+        const near = (i: number, step: 1 | -1) => {
+            for (let k = i + step; k >= 0 && k < nodes.length; k += step) if (!blankAt(k)) return k;
+            return -1;
+        };
+        const isFig = (k: number) => k !== -1 && nodes[k].kind === "paragraph" && (nodes[k] as ParaNode).hasDrawing;
+        const isTbl = (k: number) => k !== -1 && nodes[k].kind === "table";
+        roles.forEach((role, i) => {
+            const n = nodes[i];
+            if (role !== "body" || n.kind !== "paragraph" || n.hasDrawing) return;
+            if (zones[i] !== "main" && zones[i] !== "back") return;
+            const t = n.text.trim();
+            if (t.length <= 200 || t.length > 700) return;
+            const kind = captionKind(t);
+            if (kind === "figure_caption" && (isFig(near(i, -1)) || isFig(near(i, 1)))) roles[i] = kind;
+            else if (kind === "table_caption" && (isTbl(near(i, -1)) || isTbl(near(i, 1)))) roles[i] = kind;
+        });
+    }
 
     // Daftar pustaka: paragraf setelah judulnya adalah entri referensi,
     // sampai bertemu judul lain (mis. LAMPIRAN).
@@ -67,7 +121,13 @@ export function buildOutline(nodes: OutlineInput[], aiRoles: (Role | null)[] = [
         if (!inRefs) continue;
         if (roles[i] === "chapter" || roles[i] === "chapter_label" || roles[i] === "appendix_heading" ||
             roles[i] === "front_heading" || roles[i] === "list_heading") inRefs = false;
-        else if (roles[i] === "body") roles[i] = "reference";
+        else if (roles[i] === "body") {
+            // Catatan/keterangan di bawah judul Daftar Pustaka bukan entri pustaka
+            // (tidak diberi indentasi gantung).
+            const n = nodes[i];
+            const t = n.kind === "paragraph" ? n.text.trim() : "";
+            if (t.length >= 25 && !/^(catatan|keterangan|note|sumber)\b/i.test(t)) roles[i] = "reference";
+        }
     }
 
     // Jenis halaman awal diwarisi paragraf di bawah judulnya, sampai judul

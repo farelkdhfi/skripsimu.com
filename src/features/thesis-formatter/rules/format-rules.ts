@@ -267,9 +267,10 @@ export function createThesisRules(c: FormatConfig): FormatRules {
                         return tabbed();
                     }
 
-                    // Bagian awal: hanya paragraf panjang yang dirapikan sebagai prosa.
-                    // Baris pendek (tanggal, nama, NIP, "Mengetahui,") dipertahankan.
-                    if (zone === "front" || zone === "cover") {
+                    // Bagian awal & lampiran: hanya paragraf panjang yang dirapikan sebagai prosa.
+                    // Baris pendek (tanggal, nama, NIP, "Mengetahui,", alamat surat "Yth. …"/"di …",
+                    // butir isian kuesioner) dipertahankan perataan & jaraknya, tanpa indentasi.
+                    if (zone === "front" || zone === "cover" || zone === "back") {
                         if (hint.length < PROSE_MIN_LENGTH) return layoutLine();
                         return prose(hint.frontKind === "abstract" ? single : bodyLine);
                     }
