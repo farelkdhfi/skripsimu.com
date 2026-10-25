@@ -102,8 +102,8 @@ function locateBy(body: Body, tocRe: RegExp): Block | null {
     return null;
 }
 
-function locate(body: Body, flag: Flag): Block | null {
-    const label = flag === "t" ? "Tabel" : flag === "g" ? "Gambar" : null;
+function locate(body: Body, flag: Flag, figureLabel = "Gambar"): Block | null {
+    const label = flag === "t" ? "Tabel" : flag === "g" ? figureLabel : null;
     const alt = label
         ? String.raw`|\\c\s*"?${label}"?`
         : String.raw`|\\t\s*"Judul Lampiran|\\c\s*"?Lampiran"?`;
@@ -186,7 +186,7 @@ function rebuildContents(body: Body, regions: VerifyRegion[], startId: number): 
     return fresh.length;
 }
 
-export function refreshListCaches(model: DocModel, opts: { dropTc?: Set<number> } = {}) {
+export function refreshListCaches(model: DocModel, opts: { dropTc?: Set<number>; figureLabel?: string } = {}) {
     const regions: VerifyRegion[] = [];
     const counts = { tables: 0, figures: 0, appendices: 0 };
     const body = model.body;
@@ -204,7 +204,7 @@ export function refreshListCaches(model: DocModel, opts: { dropTc?: Set<number> 
     if (!contents) pruneFrontEntries(body, regions);
     for (const flag of ["t", "g", "l"] as const) {
         const entries = flag === "l" ? collectStyled(body, "JudulLampiran") : collectTc(body, flag);
-        const b = entries.length ? locate(body, flag) : null;
+        const b = entries.length ? locate(body, flag, opts.figureLabel) : null;
         if (!b) continue;
 
         const olds = oldEntries(body, b);
@@ -237,7 +237,7 @@ export function refreshListCaches(model: DocModel, opts: { dropTc?: Set<number> 
         })();
         const run = (inner: string) => `<w:r>${rPr}${inner}</w:r>`;
 
-        const label = flag === "t" ? "Tabel" : flag === "g" ? "Gambar" : null;
+        const label = flag === "t" ? "Tabel" : flag === "g" ? (opts.figureLabel ?? "Gambar") : null;
         const open = b.open.replace(
             /(<w:instrText[^>]*>)([\s\S]*?)(<\/w:instrText>)/g,
             (_all, a: string, t: string, c: string) =>

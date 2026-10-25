@@ -16,6 +16,7 @@ import { paragraphLine, type VerifyRegion } from "./verify";
 import type { ParaNode, TableNode } from "./document-model";
 import type { Outline } from "../structure/outline";
 import type { FormatRules } from "../rules/format-rules";
+import { textOf } from "./document-model";
 
 export type HeadingReport = {
   renumbered: number; retitled: number; relevelled: number;
@@ -149,7 +150,8 @@ export function normalizeHeadings(
         if (xml !== p.xml) { p.xml = xml; out.retitled++; }
       }
       const rest = titleCaseText(before.rest);
-      p.text = fixPrefix ? `${e.nums!.join(".")} ${rest}` : (opts.titleCase ? titleCaseText(p.text) : p.text);
+      // Teks catatan dibaca ulang dari isinya (title case melewati potongan miring).
+      p.text = textOf(p.xml);
 
       if (fixPrefix) {
         out.renumbered++;

@@ -94,10 +94,22 @@ export function unifyChapterHeadings(model: DocModel): ChapterHeadReport {
     }
   }
 
-  // Romawi tanpa kata BAB: hanya bila berurutan I, II, III, … (minimal dua bab).
-  const bare = cands.filter((c) => c.bare);
-  const bareOk = bare.length >= 2 && bare.every((c, k) => c.value === k + 1);
-  const accepted = cands.filter((c) => !c.bare || bareOk).sort((a, b) => b.i - a.i);
+  // Romawi tanpa kata BAB: diterima per rangkaian I, II, III, … (minimal dua bab).
+  // Daftar isi manual juga memuat "I  PENDAHULUAN", "II  TINJAUAN …" (bertab, tanpa style judul);
+  // rangkaian itu kalah dari rangkaian judul sungguhan (Heading 1 / rata tengah, tanpa tab).
+  const strong = (p: ParaNode) =>
+    p.tabCount === 0 && (p.align === "center" || /^(?:heading|judul)\s*1$|^title$/i.test(p.styleId ?? ""));
+  const runs: Cand[][] = [];
+  for (const c of cands.filter((x) => x.bare)) {
+    const run = runs[runs.length - 1];
+    if (run && c.value === run[run.length - 1].value + 1) run.push(c);
+    else if (c.value === 1) runs.push([c]);
+  }
+  const score = (r: Cand[]) => r.filter((c) => strong(body[c.i] as ParaNode)).length / r.length;
+  const best = runs.filter((r) => r.length >= 2)
+    .reduce<Cand[] | null>((a, r) => (!a || score(r) >= score(a) ? r : a), null);
+  const bareOk = new Set<Cand>(best ?? []);
+  const accepted = cands.filter((c) => !c.bare || bareOk.has(c)).sort((a, b) => b.i - a.i);
 
   for (const c of accepted) {
     const p = body[c.i] as ParaNode;

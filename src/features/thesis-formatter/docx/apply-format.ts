@@ -40,6 +40,43 @@ const ALIGN: Record<string, "left" | "center" | "right" | "both"> = {
 /** Style judul bawaan Word (juga versi lokal), plus Title/Subtitle. */
 const HEADING_STYLE_RE = /^(heading|judul)\s*\d$|^(title|subtitle)$/i;
 
+/** Rupa style paragraf (tebal, perataan), diwarisi lewat basedOn. */
+export type StyleLook = { bold: boolean; align: "left" | "center" | "right" | "both" | null };
+
+export function readStyleLook(stylesXml: string): Map<string, StyleLook> {
+  const raw = new Map<string, { b: boolean | null; jc: string | null; based: string | null }>();
+  for (const m of stylesXml.matchAll(/<w:style\b([^>]*)>([\s\S]*?)<\/w:style>/g)) {
+    if (!/w:type="paragraph"/.test(m[1])) continue;
+    const id = /w:styleId="([^"]+)"/.exec(m[1])?.[1];
+    if (!id) continue;
+    const rPr = /<w:rPr>[\s\S]*?<\/w:rPr>/.exec(m[2])?.[0] ?? "";
+    const pPr = /<w:pPr>[\s\S]*?<\/w:pPr>/.exec(m[2])?.[0] ?? "";
+    const bm = /<w:b(?:\s+w:val="([^"]*)")?\s*\/>/.exec(rPr);
+    raw.set(id, {
+      b: bm ? !/^(0|false|off)$/i.test(bm[1] ?? "") : null,
+      jc: /<w:jc w:val="(\w+)"/.exec(pPr)?.[1] ?? null,
+      based: /<w:basedOn w:val="([^"]+)"/.exec(m[2])?.[1] ?? null,
+    });
+  }
+  const out = new Map<string, StyleLook>();
+  for (const id of raw.keys()) {
+    let b: boolean | null = null;
+    let jcv: string | null = null;
+    let s: string | null = id;
+    for (let d = 0; s && d < 8; d++) {
+      const r = raw.get(s);
+      if (!r) break;
+      if (b === null) b = r.b;
+      if (jcv === null) jcv = r.jc;
+      s = r.based;
+    }
+    const align = jcv === "center" ? "center" : jcv === "right" || jcv === "end" ? "right"
+      : jcv === "both" ? "both" : jcv === "left" || jcv === "start" ? "left" : null;
+    out.set(id, { bold: b === true, align });
+  }
+  return out;
+}
+
 /* ------------------------------------------------------------------ */
 /* Run                                                                  */
 /* ------------------------------------------------------------------ */
@@ -61,6 +98,24 @@ function rprPatch(f: RunFormat, size = f.size) {
       "w:shd": null,
     }),
   };
+}
+
+/** Tabel tanpa satu garis pun (tblBorders & tcBorders nil/none) = tabel tata letak, bukan tabel data. */
+function borderless(t: { props: string | null; rows: { cells: { props: string | null }[] }[] }): boolean {
+  const tb = /<w:tblBorders>([\s\S]*?)<\/w:tblBorders>/.exec(t.props ?? "")?.[1];
+  if (tb === undefined) return false;
+  const sides = [...tb.matchAll(/<w:(?:top|left|bottom|right|start|end|insideH|insideV)\b[^>]*>/g)].map((m) => m[0]);
+  if (sides.length < 4 || sides.some((s) => !/w:val="(?:nil|none)"/.test(s))) return false;
+  return t.rows.every((r) => r.cells.every((c) => {
+    const cb = /<w:tcBorders>([\s\S]*?)<\/w:tcBorders>/.exec(c.props ?? "")?.[1] ?? "";
+    return [...cb.matchAll(/w:val="([^"]+)"/g)].every((m) => m[1] === "nil" || m[1] === "none");
+  }));
+}
+
+/** Semua run bertext dicetak miring (langsung di rPr run). */
+function allItalic(xml: string): boolean {
+  const runs = [...xml.matchAll(/<w:r(?:\s[^>]*)?>([\s\S]*?)<\/w:r>/g)].filter((m) => /<w:t[\s>]/.test(m[1]));
+  return runs.length > 0 && runs.every((m) => /<w:i(?:\s+w:val="(?:1|true|on)")?\s*\/>/.test(m[1].split("</w:rPr>")[0] ?? ""));
 }
 
 /** Ukuran asli sebuah run (half-points), bila ditulis langsung. */
@@ -85,7 +140,8 @@ function mapRuns(xml: string, f: RunFormat, onRun: () => void): string {
     let size = f.size;
     if (f.hierarchy) {
       const orig = runSize(run);
-      if (orig !== null && orig > f.hierarchy.threshold) size = f.hierarchy.large;
+      // Ukuran asli dipertahankan, hanya dibatasi ukuran judul (institusi 14 pt tidak jadi 20 pt).
+      if (orig !== null && orig > f.hierarchy.threshold) size = Math.min(orig, f.hierarchy.large);
     }
     out += withProps(run, "w:rPr", rprPatch(f, size), RPR_ORDER);
     onRun();
@@ -221,7 +277,9 @@ export function formatParagraph(
 ): void {
   let xml = node.xml;
   if (!fmt.keepIndent && !node.hasNumbering) xml = trimEdges(xml, Boolean(fmt.stripLeadingTabs));
-  xml = mapRuns(xml, run, () => rep.runsFormatted++);
+  // Miring sebagian (nama ilmiah, istilah asing) disengaja: hanya dibuang bila SELURUH teks miring.
+  const runFmt: RunFormat = run.italic === false && !allItalic(xml) ? { ...run, italic: undefined } : run;
+  xml = mapRuns(xml, runFmt, () => rep.runsFormatted++);
   xml = withProps(xml, "w:pPr", pprPatch(fmt, run, node, forceBreak), PPR_ORDER);
   node.xml = xml;
   rep.paragraphsFormatted++;
@@ -279,7 +337,7 @@ export function applyFormat(
   model: DocModel,
   outline: Outline,
   rules: FormatRules,
-  opts: { cleanupBlankPages: boolean; normalizeTables: boolean; skipTables?: Set<number> },
+  opts: { cleanupBlankPages: boolean; normalizeTables: boolean; skipTables?: Set<number>; styleLook?: Map<string, StyleLook> },
 ): ApplyReport {
   const rep: ApplyReport = {
     paragraphsFormatted: 0, runsFormatted: 0, tablesNormalized: 0,
@@ -299,9 +357,15 @@ export function applyFormat(
     if (!item) return;
     const { role, zone } = item;
 
+    // Sampul: paragraf kosong (pengatur jarak) dan paragraf berisi logo/gambar sudah ditata penulis.
+    // Mengubah ukuran huruf/spasinya menggeser isi sampul (mis. tahun) ke halaman berikutnya.
+    if (zone === "cover" && node.kind === "paragraph" && !node.hasSectPr && (!node.text.trim() || node.hasDrawing)) return;
+
     if (node.kind === "table") {
       // Tabel tanda tangan bukan tabel data: dirapikan oleh modul tanda tangan.
-      if (opts.normalizeTables && !opts.skipTables?.has(node.id)) {
+      // Tabel tanpa garis di sampul/bagian awal = tabel tata letak (lembar pengesahan): dibiarkan.
+      const layoutTable = (zone === "cover" || zone === "front") && borderless(node);
+      if (opts.normalizeTables && !opts.skipTables?.has(node.id) && !layoutTable) {
         const texts = node.rows.map((r) => r.cells.map((c) => cellParagraphs(c).map((p) => p.text).join(" ").trim()));
         normalizeTable(node, { fmt: tableFmt, rules, usableWidth, texts, rep }, rep);
       }
@@ -311,11 +375,19 @@ export function applyFormat(
     if (opts.cleanupBlankPages) dedupePageBreaks(node, rep);
 
     let fmt = rules.paragraph(role as Role, zone, item.hint);
+    let run = rules.run(role as Role, zone, item.hint);
     // Teks isi yang terlanjur memakai style Heading → dijadikan teks biasa.
     if (!isHeadingRole(role as Role) && fmt.styleId === undefined && node.styleId && HEADING_STYLE_RE.test(node.styleId)) {
       fmt = { ...fmt, styleId: null };
+      // Baris sampul/halaman awal/lampiran yang memakai style judul hanya demi rupanya (judul di
+      // lembar pengesahan, "OLEH :", nama di sampul): tebal & perataan dari style dipindah ke
+      // paragrafnya, supaya rupanya tidak berubah saat style dibuang.
+      const look = opts.styleLook?.get(node.styleId);
+      if (look && zone !== "main" && node.text.trim().length < 300) {
+        if (look.align && fmt.align === undefined) fmt = { ...fmt, align: look.align };
+        if (look.bold && run.bold === undefined) run = { ...run, bold: true };
+      }
     }
-    const run = rules.run(role as Role, zone, item.hint);
 
     // Hanya tambahkan page break bila halaman baru belum dimulai oleh
     // dokumen aslinya. Inilah yang mencegah halaman kosong ganda.
@@ -326,6 +398,11 @@ export function applyFormat(
       // Dokumen sudah memulai halaman baru di sini (break eksplisit atau
       // section break). Menyisakan pageBreakBefore akan membuat halaman kosong.
       if (!forceBreak && node.hadPageBreakBefore) rep.duplicatePageBreaksRemoved++;
+    }
+    // Paragraf biasa yang membuka halaman (blok judul penelitian di atas ABSTRAK).
+    if (item.opensPage && forceBreak === null) {
+      forceBreak = true;
+      if (!node.hadPageBreakBefore) rep.pageBreaksAdded++;
     }
 
     formatParagraph(node, fmt, run, forceBreak, rep);

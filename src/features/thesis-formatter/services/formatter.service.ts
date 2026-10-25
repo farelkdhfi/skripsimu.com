@@ -7,6 +7,7 @@ import type { Signals } from "../structure/roles";
 import type { FormatConfig } from "../schemas/format-config";
 import type { DocStats, FormatResult, IntegrityCheck } from "../types";
 import { extractCoverAI } from "./cover-ai.service";
+import { presetById } from "../presets";
 
 const EMPTY_STATS: DocStats = {
   chapters: 0, sections: 0, subsections: 0, figures: 0, figureCaptions: 0,
@@ -14,10 +15,19 @@ const EMPTY_STATS: DocStats = {
   referenceHeadings: 0,
 };
 
+/** "skripsi.docx" + preset UNPAD-FAPET → "skripsi-FORMATTED-UNPAD-FAPET.docx" */
+function outputName(name: string, c: FormatConfig): string {
+  const base = name.replace(/\.(docx|pdf)$/i, "");
+  const code = presetById(c.presetId)?.code ?? "";
+  return `${base}-FORMATTED${code ? `-${code}` : ""}.docx`;
+}
+
 function describeChanges(c: FormatConfig, s: DocStats, extra: string[]): string[] {
+  const preset = presetById(c.presetId);
   return [
+    preset.id !== "umum" ? `Preset pedoman: ${preset.name} — ${preset.source}` : "",
     `Kertas ${c.paper}, margin ${c.marginTop}/${c.marginBottom}/${c.marginLeft}/${c.marginRight} cm`,
-    `Font ${c.fontFamily} ${c.fontSize} pt, spasi ${c.lineSpacing}, indentasi paragraf ${c.indent} cm`,
+    `Font ${c.fontFamily} ${c.fontSize} pt, spasi ${c.lineRule === "exact" ? `exactly ${c.lineSpacing * c.fontSize} pt` : c.lineSpacing}, indentasi paragraf ${c.indent} cm`,
     s.chapters ? `${s.chapters} bab, ${s.sections} subbab, ${s.subsections} anak subbab diformat sebagai heading` : "",
     s.frontMatter ? `${s.frontMatter} halaman bagian awal (motto, persembahan, pengesahan, kata pengantar, daftar) dikenali dan dipertahankan urutannya` : "",
     s.references ? `${s.references} entri daftar pustaka diberi hanging indent` : "",
@@ -96,8 +106,8 @@ async function formatFromDocx(file: File, c: FormatConfig): Promise<FormatResult
     result.lists ? `${result.lists} butir daftar ketikan diubah menjadi numbering/bullet otomatis Word` : "",
     result.portraitConverted ? `${result.portraitConverted} section tabel landscape dikembalikan ke portrait karena tabelnya muat` : "",
     result.signatures.blocks ? `${result.signatures.blocks} blok tanda tangan dirapikan menjadi tabel tanpa border dengan ruang tanda tangan` : "",
-    result.captions.table.numbered ? `${result.captions.table.numbered} keterangan tabel dinomori ulang per bab (caption Word: style Caption + nomor otomatis)` : "",
-    result.captions.figure.numbered ? `${result.captions.figure.numbered} keterangan gambar dinomori ulang per bab, diletakkan di bawah gambar` : "",
+    result.captions.table.numbered ? `${result.captions.table.numbered} keterangan tabel dinomori ulang ${c.captionNumbering === "global" ? "berurutan" : "per bab"} (caption Word: style Caption + nomor otomatis)` : "",
+    result.captions.figure.numbered ? `${result.captions.figure.numbered} keterangan ${(result.captions.figure.label ?? "Gambar").toLowerCase()} dinomori ulang ${c.captionNumbering === "global" ? "berurutan" : "per bab"}, diletakkan di bawah gambar` : "",
     result.captions.table.refsUpdated + result.captions.figure.refsUpdated
       ? `${result.captions.table.refsUpdated + result.captions.figure.refsUpdated} rujukan tabel/gambar di dalam teks disesuaikan dengan nomor baru` : "",
     result.captions.notes ? `${result.captions.notes} catatan di bawah tabel diformat 10 pt` : "",
@@ -107,7 +117,7 @@ async function formatFromDocx(file: File, c: FormatConfig): Promise<FormatResult
   ];
 
   return {
-    fileName: file.name.replace(/\.(docx|pdf)$/i, "") + "-formatted.docx",
+    fileName: outputName(file.name, c),
     docxBase64: result.buffer.toString("base64"),
     source: "docx",
     mode: "preserve",
@@ -154,7 +164,7 @@ async function formatFromPdf(file: File, paragraphs: string[], c: FormatConfig):
     validation.push({ level: "warn", message: "Judul bab tidak terdeteksi. Pastikan penulisannya seperti 'BAB I PENDAHULUAN'." });
 
   return {
-    fileName: file.name.replace(/\.(docx|pdf)$/i, "") + "-formatted.docx",
+    fileName: outputName(file.name, c),
     docxBase64: buf.toString("base64"),
     source: "pdf",
     mode: "rebuild",

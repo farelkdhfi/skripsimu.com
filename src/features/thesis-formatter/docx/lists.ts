@@ -245,8 +245,11 @@ const S = () => LIST_STYLE.step;
 const indXml = (lvl: number) => `<w:ind w:left="${(lvl + 1) * S()}" w:hanging="${S()}"/>`;
 const paraInd = (lvl: number) => `<w:ind w:left="${(lvl + 1) * S()}" w:right="0" w:hanging="${S()}"/>`;
 
-function typedLvl(lvl: number, mk: Marker, start: number, font: string): string {
-  const text = mk.kind === "bullet" ? mk.glyph : `%${lvl + 1}${LIST_STYLE.separator}`;
+function typedLvl(lvl: number, mk: Marker, start: number, font: string, keep = false): string {
+  // keep: bentuk penanda asli dipertahankan ("(1)", "1)", "a.") — mis. pedoman yang memakai (1), (2).
+  const [, open, close] = mk.family.split("|");
+  const text = mk.kind === "bullet" ? mk.glyph
+    : keep ? `${open ? "(" : ""}%${lvl + 1}${close || "."}` : `%${lvl + 1}${LIST_STYLE.separator}`;
   const f = escapeXml(mk.kind === "bullet" && mk.glyphFont ? mk.glyphFont : font);
   return `<w:lvl w:ilvl="${lvl}"><w:start w:val="${start}"/><w:numFmt w:val="${mk.kind}"/>` +
     `<w:lvlText w:val="${escapeXml(text)}"/><w:lvlJc w:val="left"/>` +
@@ -255,7 +258,7 @@ function typedLvl(lvl: number, mk: Marker, start: number, font: string): string 
 }
 
 /** Salinan abstractNum daftar Word asli dengan geometri & pemisah yang diseragamkan. */
-function cloneAbstract(absXml: string, newId: number): string | null {
+function cloneAbstract(absXml: string, newId: number, keep = false): string | null {
   if (/<w:numStyleLink\b/.test(absXml)) return null;
   let x = absXml
     .replace(/w:abstractNumId="\d+"/, `w:abstractNumId="${newId}"`)
@@ -263,7 +266,7 @@ function cloneAbstract(absXml: string, newId: number): string | null {
   x = x.replace(/<w:lvl\b[^>]*w:ilvl="(\d)"[^>]*>[\s\S]*?<\/w:lvl>/g, (lvl, k: string) => {
     const fmt = /<w:numFmt w:val="(\w+)"/.exec(lvl)?.[1] ?? "decimal";
     let out = lvl.replace(/<w:pStyle\b[^>]*\/>/, "");
-    if (fmt !== "bullet" && fmt !== "none" && LIST_STYLE.separator === ".") {
+    if (!keep && fmt !== "bullet" && fmt !== "none" && LIST_STYLE.separator === ".") {
       out = out.replace(/<w:lvlText w:val="([^"]*)"\/>/, (_m, t: string) =>
         `<w:lvlText w:val="${t.replace(/\((%\d)\)/g, "$1.").replace(/(%\d)\)/g, "$1.")}"/>`);
     }
@@ -295,9 +298,10 @@ export async function formatLists(
   zip: JSZip,
   nodes: (ParaNode | TableNode)[],
   outline: Outline,
-  opts: { font: string; exclude: Set<number> },
+  opts: { font: string; exclude: Set<number>; markers?: "uniform" | "keep" },
 ): Promise<ListReport> {
   const rep: ListReport = { items: 0, typed: 0, native: 0, lists: 0, layout: new Map(), regions: [] };
+  const keep = opts.markers === "keep";
 
   let numXml = (await zip.file("word/numbering.xml")?.async("string")) ?? null;
   const stylesXml = (await zip.file("word/styles.xml")?.async("string")) ?? "";
@@ -324,7 +328,7 @@ export async function formatLists(
     const it = outline.items[i];
     return it && (it.zone === "main" || it.zone === "front") && it.role === "body";
   };
-    nodes.forEach((n, i) => {
+  nodes.forEach((n, i) => {
     if (n.kind !== "paragraph") return;
     const it = outline.items[i];
     // Lampiran: tidak dikonversi, tapi indentasi aslinya disimpan karena applyFormat
@@ -381,7 +385,7 @@ export async function formatLists(
     lastItem = null;
   };
   const newTyped = (mk: Marker, level: number, fam: string, pos: number): Inst => {
-    const id = addNum(`<w:abstractNum w:abstractNumId="${absId}"><w:multiLevelType w:val="multilevel"/>${typedLvl(level, mk, mk.value, opts.font)}</w:abstractNum>`);
+    const id = addNum(`<w:abstractNum w:abstractNumId="${absId}"><w:multiLevelType w:val="multilevel"/>${typedLvl(level, mk, mk.value, opts.font, keep)}</w:abstractNum>`);
     return { family: fam, level, numId: id, last: mk.value, pos, glyph: mk.glyph };
   };
   const place = (p: ParaNode, xml: string, level: number, nid: number, headingLike: boolean) => {
@@ -415,7 +419,7 @@ export async function formatLists(
       let nid = nativeOpen.get(c.numId);
       if (nid === undefined) {
         const a = numbering!.num.get(c.numId);
-        const clone = a ? cloneAbstract(numbering!.abs.get(a)!, absId) : null;
+        const clone = a ? cloneAbstract(numbering!.abs.get(a)!, absId, keep) : null;
         nid = clone ? addNum(clone) : Number(c.numId);
         nativeOpen.set(c.numId, nid);
         if (lastItem?.headingLike) own(lastItem.level);

@@ -638,11 +638,18 @@ function normalizeLogo(run: string, maxTw: number, minTw = 0): { xml: string; he
 
 const PG_BORDERS = /<w:pgBorders\b[^>]*\/>|<w:pgBorders\b[\s\S]*?<\/w:pgBorders>/g;
 
+type Group = (ParaNode | TableNode)[];
+type BuildOpts = { style: CoverStyle; font: string; width: number; height: number; docTypeFallback: string; ai?: CoverAI };
+
+/**
+ * Satu dokumen bisa punya beberapa halaman sampul (sampul muka + sampul dalam, sampul
+ * Indonesia + Inggris). Tiap halaman (dipisah section/page break) disusun sendiri.
+ */
 export async function buildCoverFromTemplate(
   model: DocModel,
   nodes: (ParaNode | TableNode)[],
   outline: Outline,
-  opts: { style: CoverStyle; font: string; width: number; height: number; docTypeFallback: string; ai?: CoverAI },
+  opts: BuildOpts,
 ): Promise<CoverTemplateResult> {
   const none = { tables: 0, rows: 0, cells: 0 };
   const fail = (reason: string): CoverTemplateResult => ({ built: false, source: null, reason, fields: {}, regions: [], removed: none });
@@ -654,6 +661,50 @@ export async function buildCoverFromTemplate(
   if (pos.some((p) => p < 0) || pos.some((p, k) => k > 0 && p !== pos[k - 1] + 1)) {
     return fail("bagian sampul tidak berurutan dalam dokumen.");
   }
+
+  const pages: Group[] = [[]];
+  for (const n of coverNodes) {
+    pages[pages.length - 1].push(n);
+    if (n.kind === "paragraph" && (n.hasSectPr || n.hasPageBreak)) pages.push([]);
+  }
+  const hasText = (g: Group) => g.some((n) => n.kind === "table" || Boolean(n.text.trim()) || n.hasDrawing);
+  const groups: Group[] = [];
+  for (const g of pages) {
+    if (!g.length) continue;
+    if (hasText(g) || !groups.length) groups.push(g);
+    else groups[groups.length - 1].push(...g);
+  }
+  if (groups.length > 1 && !hasText(groups[0])) groups[1].unshift(...groups.shift()!);
+
+  // Dari halaman terakhir ke pertama, supaya posisi halaman sebelumnya di body tidak bergeser.
+  const results: CoverTemplateResult[] = [];
+  for (let g = groups.length - 1; g >= 0; g--) results.unshift(await buildPage(model, nodes, outline, groups[g], opts));
+  const ok = results.filter((r) => r.built);
+  if (!ok.length) return results[0];
+  return {
+    built: true,
+    source: ok.some((r) => r.source === "ai") ? "ai" : "rules",
+    reason: results.find((r) => !r.built)?.reason ?? null,
+    fields: ok[0].fields,
+    regions: ok.flatMap((r) => r.regions),
+    removed: ok.reduce((a, r) => ({
+      tables: a.tables + r.removed.tables, rows: a.rows + r.removed.rows, cells: a.cells + r.removed.cells,
+    }), none),
+  };
+}
+
+async function buildPage(
+  model: DocModel,
+  nodes: (ParaNode | TableNode)[],
+  outline: Outline,
+  coverNodes: Group,
+  opts: BuildOpts,
+): Promise<CoverTemplateResult> {
+  const none = { tables: 0, rows: 0, cells: 0 };
+  const fail = (reason: string): CoverTemplateResult => ({ built: false, source: null, reason, fields: {}, regions: [], removed: none });
+  const body = model.body;
+  const pos = coverNodes.map((n) => body.indexOf(n as DocModel["body"][number]));
+  if (pos.some((p) => p < 0)) return fail("bagian sampul tidak berurutan dalam dokumen.");
 
   /* ---- baris teks berformat, logo, section break ---- */
   const rich: Rich[] = [];
@@ -796,7 +847,9 @@ export async function buildCoverFromTemplate(
   const H = opts.height;
   const tHalf = st.titleHalf;
   const xHalf = st.textHalf;
-  const trHalf = Math.max(xHalf, tHalf - 4);
+  const trHalf = st.translationSame ? tHalf : Math.max(xHalf, tHalf - 4);
+  // "Oleh:" hanya bila sampul asli memilikinya, atau pedoman memintanya.
+  const useLabel = Boolean(f.authorLabel) || st.authorLabel;
   const lineTw = (half: number) => Math.round(half * 10 * 1.15);
   const h = (t: string, half: number, wide: boolean) =>
     Math.max(1, Math.ceil((t.length * half * 10 * (wide ? 0.62 : 0.52)) / W)) * lineTw(half);
@@ -806,7 +859,7 @@ export async function buildCoverFromTemplate(
   const docH = sum(docLines.map((t) => h(t, DOC_HALF, true))) + (docNote ? h(docNote, DOC_HALF, false) : 0);
   const purposeH = purposeGroups.length ? 240 + sum(purposeGroups.map((g) => h(g.t, xHalf, false))) : 0;
   const topH = blocks.top.length ? 120 + sum(blocks.top.map((i) => h(lines[i], xHalf, false))) : 0;
-  const authorH = lineTw(xHalf) + h(f.name, xHalf, true) + (idLine ? lineTw(xHalf) : 0) +
+  const authorH = (useLabel ? lineTw(xHalf) : 0) + h(f.name, xHalf, true) + (idLine ? lineTw(xHalf) : 0) +
     sum(blocks.identity.map((i) => h(lines[i], xHalf, false)));
   const advH = advisors.length
     ? 240 + sum(advisors.map((a) => h(a.r.t, xHalf, false))) + 120 * Math.max(0, advisors.filter((a) => a.label).length - 1)
@@ -816,17 +869,14 @@ export async function buildCoverFromTemplate(
   const SECT_LINE = 60;
 
   // Empat ruang kosong: judul→jenis dokumen, keterangan→"Oleh", identitas→logo, logo→institusi.
-  // Ruang di atas & di bawah logo dibuat sama besar; tiap ruang punya batas minimum agar tidak berdempetan.
   const hasLogo = logos.length > 0;
   const weight = { top: 1, author: 0.7, logo: hasLogo ? 1 : 0, bottom: 1 };
   const minGap = { top: 360, author: 240, logo: hasLogo ? 360 : 0, bottom: 480 };
   const minSum = minGap.top + minGap.author + minGap.logo + minGap.bottom;
   const wSum = weight.top + weight.author + weight.logo + weight.bottom;
 
-  // Logo diperkecil bila ruang minimum tidak terpenuhi (minimal ±1,6 cm).
   const logoXml: string[] = [];
   let logoH = 0;
-  // Logo sampul ±25% lebih besar dari batas bawaan; logo kecil diperbesar ke ±85% ukuran itu.
   let maxLogo = Math.round(st.logoMaxTwips * 1.25);
   const minLogo = Math.round(maxLogo * 0.85);
   for (let pass = 0; pass < 3; pass++) {
@@ -851,7 +901,6 @@ export async function buildCoverFromTemplate(
   const gapTop = gapOf("top");
   const gapAuthor = gapOf("author");
   const gapLogo = gapOf("logo");
-  // Ruang bawah logo = sisa halaman (≈ gapOf("bottom")), karena blok institusi menempel di margin bawah.
 
   /* ---- XML ---- */
   const fn = escapeXml(opts.font);
@@ -889,15 +938,15 @@ export async function buildCoverFromTemplate(
   // Judul (paling atas)
   titleGroups.forEach((g) => out.push(g.tr
     ? paraRich(g.r, { half: trHalf, bold: true, before: 120 })
-    : paraRich(g.r, { half: tHalf, bold: true, caps: true })));
+    : paraRich(g.r, { half: tHalf, bold: true, caps: st.titleCaps })));
   // Blok tengah: jenis dokumen (12 pt), keterangan, identitas, pembimbing, logo
   docLines.forEach((t, i) => out.push(para(t, { half: DOC_HALF, bold: true, caps: true, before: i === 0 ? gapTop : 0 })));
   if (docNote) out.push(para(docNote, { half: DOC_HALF }));
   purposeGroups.forEach((g, i) => out.push(paraRich(g, { half: xHalf, before: i === 0 ? 240 : 0 })));
   blocks.top.forEach((li, i) => out.push(paraRich(rich[li], { half: xHalf, before: i === 0 ? 120 : 0 })));
-  out.push(para(f.authorLabel ?? "Oleh:", { half: xHalf, before: gapAuthor }));
-  out.push(para(f.name, { half: xHalf, bold: true, caps: true }));
-  if (idLine) out.push(para(idLine, { half: xHalf }));
+  if (useLabel) out.push(para(f.authorLabel ?? "Oleh:", { half: xHalf, before: gapAuthor }));
+  out.push(para(f.name, { half: xHalf, bold: true, caps: st.nameCaps, before: useLabel ? 0 : gapAuthor }));
+  if (idLine) out.push(para(idLine, { half: xHalf, bold: st.idBold }));
   for (const li of blocks.identity) out.push(paraRich(rich[li], { half: xHalf }));
   advisors.forEach((a, i) => out.push(paraRich(a.r, { half: xHalf, before: i === 0 ? 240 : a.label ? 120 : 0 })));
   if (logoXml.length) {
@@ -905,7 +954,7 @@ export async function buildCoverFromTemplate(
       `<w:ind w:left="0" w:right="0" w:firstLine="0"/><w:jc w:val="center"/></w:pPr>${logoXml.join("")}</w:p>`);
   }
   // Identitas institusi (frame di margin bawah)
-  for (const t of blocks.inst) out.push(para(t, { half: st.institutionHalf, bold: true, caps: st.institutionCaps, frame: true }));
+  for (const t of blocks.inst) out.push(para(t, { half: st.institutionHalf, bold: st.institutionBold, caps: st.institutionCaps, frame: true }));
 
   // Paragraf penutup dibuat sangat kecil agar tidak mendorong sampul ke halaman kedua.
   const tiny = `<w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"/><w:rPr><w:sz w:val="2"/><w:szCs w:val="2"/></w:rPr>`;

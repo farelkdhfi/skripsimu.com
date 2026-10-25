@@ -81,7 +81,7 @@ export type DocModel = {
  */
 const TEXT_TOKEN_RE = /<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>|<w:tab\s*\/>|<w:br(?![^>]*w:type="page")[^>]*\/>|<w:cr\s*\/>/g;
 
-function textOf(xml: string): string {
+export function textOf(xml: string): string {
   let out = "";
   let m: RegExpExecArray | null;
   TEXT_TOKEN_RE.lastIndex = 0;

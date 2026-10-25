@@ -23,7 +23,12 @@ export type OutlineItem = {
     breakAlreadyPresent?: boolean;
     /** Judul ini sengaja berbagi halaman dengan judul sebelumnya (motto + persembahan). */
     sharesPage?: boolean;
+    /** Paragraf biasa yang membuka halaman baru (blok judul penelitian di atas ABSTRAK). */
+    opensPage?: boolean;
 };
+
+/** Paragraf tanpa teks yang hanya memuat objek melayang (kotak/bingkai halaman pernyataan). */
+const floatingOnly = (p: ParaNode) => /<wp:anchor\b/.test(p.xml) && !/<wp:inline\b/.test(p.xml);
 
 export type Outline = {
     items: OutlineItem[];
@@ -39,6 +44,7 @@ function signalsOf(n: OutlineInput, chapterIds: Set<number>): Signals {
         ? { text: "", hasDrawing: false, isTable: true }
         : {
             text: n.text, hasDrawing: n.hasDrawing, isTable: false,
+            floatingOnly: n.hasDrawing && /<wp:anchor\b/.test(n.xml) && !/<wp:inline\b|<w:pict[\s>]|<w:object[\s>]/.test(n.xml),
             captionStyled: /caption|keterangan/i.test(n.styleId ?? ""),
             chapterHint: chapterIds.has(n.id),
         };
@@ -202,13 +208,50 @@ export function buildOutline(nodes: OutlineInput[], aiRoles: (Role | null)[] = [
 
         let k = i - 1;
         while (k >= 0 && nodes[k].kind === "paragraph" && !(nodes[k] as ParaNode).text.trim() &&
-            !(nodes[k] as ParaNode).hasDrawing && !(nodes[k] as ParaNode).hasPageBreak &&
-            !(nodes[k] as ParaNode).hasSectPr) k--;
+            (!(nodes[k] as ParaNode).hasDrawing || floatingOnly(nodes[k] as ParaNode)) &&
+            !(nodes[k] as ParaNode).hasPageBreak && !(nodes[k] as ParaNode).hasSectPr) k--;
         if (k < 0) { items[i].breakAlreadyPresent = true; continue; }
         const prev = nodes[k];
         if (prev.kind === "paragraph" && (prev.hasPageBreak || prev.hasSectPr)) items[i].breakAlreadyPresent = true;
         if (items[k]?.pairedTitleNext && items[i].continuesChapterLabel) items[i].breakAlreadyPresent = true;
         if (items[i].sharesPage) items[i].breakAlreadyPresent = true;
+    }
+
+    // Judul penelitian + nama penulis di atas ABSTRAK/ABSTRACT (mis. pedoman UNPAD) satu
+    // halaman dengan judul halamannya: halaman baru dimulai di awal blok, bukan di kata ABSTRAK.
+    {
+        const ABSTRACT_HEAD_RE = /^(abstrak|abstract|intisari|ringkasan)$/i;
+        const upperish = (t: string) => {
+            const l = t.replace(/[^A-Za-z]/g, "");
+            return l.length >= 10 && l.replace(/[^A-Z]/g, "").length / l.length >= 0.7;
+        };
+        for (let i = 0; i < items.length; i++) {
+            const n = nodes[i];
+            if (items[i].role !== "front_heading" || n.kind !== "paragraph" || !ABSTRACT_HEAD_RE.test(n.text.trim())) continue;
+            const block: number[] = [];
+            let k = i - 1;
+            for (; k >= 0 && block.length < 6; k--) {
+                const m = nodes[k];
+                if (m.kind !== "paragraph") break;
+                const t = m.text.trim();
+                if (!t) {
+                    if (m.hasDrawing || m.hasPageBreak || m.hasSectPr) break;
+                    continue;
+                }
+                if (m.hasPageBreak || m.hasSectPr || items[k].role !== "body" || m.align !== "center" || t.length > 300) break;
+                block.unshift(k);
+            }
+            if (!block.length) continue;
+            const titled = block.some((j) => {
+                const t = (nodes[j] as ParaNode).text.trim();
+                return upperish(t) && t.split(/\s+/).length >= 3;
+            });
+            if (!titled) continue;
+            items[i].breakAlreadyPresent = true;
+            const prev = k >= 0 ? nodes[k] : null;
+            const boundary = !prev || (prev.kind === "paragraph" && (prev.hasPageBreak || prev.hasSectPr));
+            if (!boundary) items[block[0]].opensPage = true;
+        }
     }
 
     const mainStart = zones.findIndex((z) => z === "main");

@@ -11,7 +11,7 @@
  *  - bab yang keterangannya tidak semua dikenali tidak dinomori ulang (cegah nomor ganda)
  */
 import { escapeXml, withProps, PPR_ORDER } from "./xml";
-import { parseBlocks, type DocModel, type ParaNode, type TableNode } from "./document-model";
+import { parseBlocks, textOf, type DocModel, type ParaNode, type TableNode } from "./document-model";
 import { paragraphLine, type VerifyRegion } from "./verify";
 import type { Outline, OutlineItem } from "../structure/outline";
 import { captionKind } from "../structure/roles";
@@ -38,8 +38,8 @@ const SPEC: Record<CaptionKind, Spec> = {
     },
     figure: {
         role: "figure_caption", label: "Gambar", noun: "gambar", below: true,
-        words: String.raw`gambar|gbr\.?|figure|fig\.?`,
-        refWords: String.raw`Gambar|GAMBAR|Figure|Gbr\.?|Fig\.?`,
+        words: String.raw`gambar|gbr\.?|figure|fig\.?|ilustrasi`,
+        refWords: String.raw`Gambar|GAMBAR|Figure|Gbr\.?|Fig\.?|Ilustrasi|ILUSTRASI`,
     },
 };
 
@@ -270,8 +270,12 @@ function unbold(xml: string): string {
     });
 }
 
-/** Bangun ulang: "<Label> <bab>." + {SEQ <Label>} + " " + judul, style Caption. */
-function rebuildCaption(p: ParaNode, s: Spec, chapter: number, k: number): boolean {
+/**
+ * Bangun ulang keterangan + style Caption:
+ *  - per bab   : "<Label> <bab>." + {SEQ <Label> \r per bab} + pemisah + judul  ("Tabel 2.1 Judul")
+ *  - berurutan : "<Label> " + {SEQ <Label>} + pemisah + judul                    ("Tabel 3. Judul")
+ */
+function rebuildCaption(p: ParaNode, s: Spec, chapter: number, k: number, o: { global: boolean; sep: string }): boolean {
     const r = RX[s.role === "table_caption" ? "table" : "figure"];
     const before = paragraphLine(p.xml);
     let xml = stripFields(stripFields(p.xml, /^\s*SEQ\b/i, true), /^\s*TC\b/i, false);
@@ -290,20 +294,21 @@ function rebuildCaption(p: ParaNode, s: Spec, chapter: number, k: number): boole
 
     const rPr = /<w:r(?:\s[^>]*)?>\s*(<w:rPr>[\s\S]*?<\/w:rPr>)/.exec(xml)?.[1] ?? "";
     const run = (inner: string) => `<w:r>${rPr}${inner}</w:r>`;
+    const head = o.global ? `${s.label} ` : `${s.label} ${chapter}.`;
     const prefix =
-        run(`<w:t xml:space="preserve">${s.label} ${chapter}.</w:t>`) +
+        run(`<w:t xml:space="preserve">${escapeXml(head)}</w:t>`) +
         run(`<w:fldChar w:fldCharType="begin"/>`) +
-        run(`<w:instrText xml:space="preserve"> SEQ ${s.label} \\* ARABIC${k === 1 ? " \\r 1" : ""} </w:instrText>`) +
+        run(`<w:instrText xml:space="preserve"> SEQ ${s.label} \\* ARABIC${!o.global && k === 1 ? " \\r 1" : ""} </w:instrText>`) +
         run(`<w:fldChar w:fldCharType="separate"/>`) +
         run(`<w:t>${k}</w:t>`) +
         run(`<w:fldChar w:fldCharType="end"/>`) +
-        run(`<w:t xml:space="preserve"> </w:t>`);
+        run(`<w:t xml:space="preserve">${escapeXml(o.sep)}</w:t>`);
 
     const end = xml.indexOf("</w:pPr>");
     const at = end !== -1 ? end + 8 : xml.indexOf(">") + 1;
     xml = xml.slice(0, at) + prefix + xml.slice(at);
     p.xml = withProps(xml, "w:pPr", { "w:pStyle": `<w:pStyle w:val="Caption"/>` }, PPR_ORDER);
-    p.text = `${s.label} ${chapter}.${k} ${p.text.replace(r.text, "")}`;
+    p.text = `${head}${k}${o.sep}${p.text.replace(r.text, "")}`;
     p.hasField = true;
     return paragraphLine(p.xml) !== before;
 }
@@ -361,8 +366,31 @@ export function promoteUnnumberedCaptions(nodes: (ParaNode | TableNode)[], outli
 /* Penataan + penomoran + rujukan                                       */
 /* ------------------------------------------------------------------ */
 
+export type CaptionOptions = {
+    /** "chapter" = Tabel 2.1, "global" = Tabel 3 (berurutan seluruh naskah). */
+    numbering?: "chapter" | "global";
+    /** Teks setelah nomor: " " (Tabel 2.1 Judul) atau ". " (Tabel 3. Judul). */
+    separator?: string;
+    /** Label keterangan; null = ikuti dokumen (gambar: "Ilustrasi" bila itu yang dominan). */
+    label?: string | null;
+};
+
+/** Label keterangan gambar yang dipakai dokumen ("Ilustrasi" vs "Gambar"). */
+export function figureLabelOf(nodes: (ParaNode | TableNode)[], outline: Outline): string {
+    let ilu = 0;
+    let gam = 0;
+    nodes.forEach((n, i) => {
+        if (n.kind !== "paragraph" || outline.items[i]?.role !== "figure_caption") return;
+        if (/^\s*ilustrasi\b/i.test(n.text)) ilu++;
+        else if (/^\s*(gambar|gbr)\b/i.test(n.text)) gam++;
+    });
+    return ilu > gam ? "Ilustrasi" : "Gambar";
+}
+
 export type CaptionReport = {
     kind: CaptionKind;
+    /** Label yang dipakai ("Tabel", "Gambar", "Ilustrasi") — juga nama SEQ-nya. */
+    label: string;
     titled: number;
     moved: number;
     numbered: number;
@@ -383,11 +411,18 @@ export function arrangeCaptions(
     nodes: (ParaNode | TableNode)[],
     outline: Outline,
     kind: CaptionKind,
+    opts: CaptionOptions = {},
 ): CaptionReport {
-    const s = SPEC[kind];
+    const base = SPEC[kind];
     const r = RX[kind];
+    const label = opts.label ?? (kind === "figure" ? figureLabelOf(nodes, outline) : base.label);
+    const s: Spec = { ...base, label };
+    const global = opts.numbering === "global";
+    const sep = opts.separator === "period" ? ". "
+        : opts.separator === "space" || opts.separator == null ? " "
+            : opts.separator;
     const rep: CaptionReport = {
-        kind, titled: 0, moved: 0, numbered: 0, refsUpdated: 0, split: 0,
+        kind, label, titled: 0, moved: 0, numbered: 0, refsUpdated: 0, split: 0,
         unresolved: [], uncaptioned: [], skipped: [], appendix: new Set(), regions: [],
     };
     const body = model.body;
@@ -419,7 +454,7 @@ export function arrangeCaptions(
         if (!r.starts.test(n.text)) return;
         orig.set(n, { line: paragraphLine(n.xml), text: n.text });
         const xml = retext(n.xml, titleOnly);
-        if (xml !== n.xml) { n.xml = xml; n.text = titleOnly(n.text); rep.titled++; }
+        if (xml !== n.xml) { n.xml = xml; n.text = textOf(xml); rep.titled++; }
     });
 
     // 2. Keterangan di sisi yang salah → pindah ke sisi yang benar.
@@ -485,21 +520,23 @@ export function arrangeCaptions(
             }
             return;
         }
-        if (unsafe.has(c)) return;
+        // Berurutan: satu bab bermasalah menghentikan penomoran ulang seluruh naskah (cegah nomor ganda).
+        if (global ? unsafe.size > 0 : unsafe.has(c)) return;
         const om = r.oldNum.exec(n.text);
         if (!om) {
             const o = nextContent(bi, -dir as 1 | -1);
             const drawing = o !== -1 && body[o].kind === "paragraph" && (body[o] as ParaNode).hasDrawing;
             if (!isObj(o) && !(kind === "table" && drawing)) return;
         }
-        const k = (counters.get(c) ?? 0) + 1;
-        counters.set(c, k);
+        const key = global ? 0 : c;
+        const k = (counters.get(key) ?? 0) + 1;
+        counters.set(key, k);
         const o = nextContent(bi, -dir as 1 | -1);
         mapping.push({
             old: om ? om[1].replace(/\s+/g, "").replace(/-/g, ".") : null, implied: null,
-            next: `${c}.${k}`, pos: bi, obj: isObj(o) ? o : bi, chapter: c, desc: n.text.replace(r.text, ""),
+            next: global ? String(k) : `${c}.${k}`, pos: bi, obj: isObj(o) ? o : bi, chapter: c, desc: n.text.replace(r.text, ""),
         });
-        if (rebuildCaption(n, s, c, k)) renumbered.add(n);
+        if (rebuildCaption(n, s, c, k, { global, sep })) renumbered.add(n);
         rep.numbered++;
         // Keterangan gambar berisi penjelasan / sumber → dipisah setelah rujukan selesai.
         if (s.below) {
@@ -557,7 +594,7 @@ export function arrangeCaptions(
         const zone = itemOf.get(n.id)?.zone;
         if (zone !== "main" && zone !== "back") return;
         const ch = chapterOf.get(n.id) ?? null;
-        if (ch != null && unsafe.has(ch)) return;
+        if (ch != null && (global ? unsafe.size > 0 : unsafe.has(ch))) return;
         const full = fullText(n.xml);
         r.ref.lastIndex = 0;
         if (!r.ref.test(full)) return;
@@ -599,9 +636,11 @@ export function arrangeCaptions(
         const bi = body.indexOf(p);
         const parts = bi === -1 ? null : splitParagraph(p.xml, cut);
         if (!parts) continue;
+        // Baris penjelasan/"Sumber:" mengikuti perataan keterangannya (rata kiri pada pedoman UNPAD).
+        const capJc = /<w:jc w:val="(\w+)"\/>/.exec(p.xml.slice(0, Math.max(0, p.xml.indexOf("</w:pPr>"))))?.[1] ?? "center";
         const tailXml =
             `<w:p><w:pPr><w:keepNext w:val="0"/><w:spacing w:before="0" w:after="240" w:line="240" w:lineRule="auto"/>` +
-            `<w:ind w:left="0" w:right="0" w:firstLine="0"/><w:jc w:val="center"/></w:pPr>${parts.tail}</w:p>`;
+            `<w:ind w:left="0" w:right="0" w:firstLine="0"/><w:jc w:val="${capJc === "both" ? "left" : capJc}"/></w:pPr>${parts.tail}</w:p>`;
         const tail = (parseBlocks(tailXml, nextId++) as ParaNode[])[0];
         if (!tail || tail.kind !== "paragraph" || !tail.text.trim()) continue;
         p.xml = parts.head;
@@ -651,31 +690,31 @@ export function arrangeCaptions(
 
 /** Lebar glyph (per 1000 em) untuk menghitung lebar label "Tabel 4.12 ". */
 const GLYPH: Record<string, Record<string, number>> = {
-  "Times New Roman": { d: 500, ".": 250, " ": 250, "-": 333, T: 611, a: 444, b: 500, e: 444, l: 278, L: 611 },
-  Arial: { d: 556, ".": 278, " ": 278, "-": 333, T: 611, a: 556, b: 556, e: 556, l: 222, L: 556 },
-  Calibri: { d: 507, ".": 252, " ": 226, "-": 306, T: 487, a: 479, b: 525, e: 498, l: 229, L: 420 },
+    "Times New Roman": { d: 500, ".": 250, " ": 250, "-": 333, T: 611, a: 444, b: 500, e: 444, l: 278, L: 611 },
+    Arial: { d: 556, ".": 278, " ": 278, "-": 333, T: 611, a: 556, b: 556, e: 556, l: 222, L: 556 },
+    Calibri: { d: 507, ".": 252, " ": 226, "-": 306, T: 487, a: 479, b: 525, e: 498, l: 229, L: 420 },
 };
 
 function labelTwips(label: string, font: string, halfPts: number): number {
-  const w = GLYPH[font] ?? GLYPH["Times New Roman"];
-  let units = 0;
-  for (const ch of label) units += /\d/.test(ch) ? w.d : w[ch] ?? 500;
-  return Math.ceil((units / 1000) * halfPts * 10);
+    const w = GLYPH[font] ?? GLYPH["Times New Roman"];
+    let units = 0;
+    for (const ch of label) units += /\d/.test(ch) ? w.d : w[ch] ?? 500;
+    return Math.ceil((units / 1000) * halfPts * 10);
 }
 
 /** Keterangan tabel (rata kiri): baris kedua dst. sejajar huruf pertama judul. */
 export function hangTableCaptions(model: DocModel, font: string): number {
-  let count = 0;
-  for (const n of model.body) {
-    if (n.kind !== "paragraph" || !/<w:pStyle w:val="Caption"\/>/.test(n.xml)) continue;
-    if (/<w:jc w:val="(center|right|end)"/.test(n.xml)) continue;
-    const m = /^\s*((?:tabel|table)\s+[A-Za-z]{0,2}[.\-]?\d+(?:[.\-]\d+)*\.?\s+)/i.exec(n.text);
-    if (!m) continue;
-    const runs = n.xml.slice(Math.max(0, n.xml.indexOf("</w:pPr>")));
-    const half = Number(/<w:sz w:val="(\d+)"/.exec(runs)?.[1] ?? 24);
-    const h = labelTwips(m[1], font, half) + 15;
-    n.xml = withProps(n.xml, "w:pPr", { "w:ind": `<w:ind w:left="${h}" w:right="0" w:hanging="${h}"/>` }, PPR_ORDER);
-    count++;
-  }
-  return count;
+    let count = 0;
+    for (const n of model.body) {
+        if (n.kind !== "paragraph" || !/<w:pStyle w:val="Caption"\/>/.test(n.xml)) continue;
+        if (/<w:jc w:val="(center|right|end)"/.test(n.xml)) continue;
+        const m = /^\s*((?:tabel|table|gambar|ilustrasi|figure)\s+[A-Za-z]{0,2}[.\-]?\d+(?:[.\-]\d+)*\.?\s+)/i.exec(n.text);
+        if (!m) continue;
+        const runs = n.xml.slice(Math.max(0, n.xml.indexOf("</w:pPr>")));
+        const half = Number(/<w:sz w:val="(\d+)"/.exec(runs)?.[1] ?? 24);
+        const h = labelTwips(m[1], font, half) + 15;
+        n.xml = withProps(n.xml, "w:pPr", { "w:ind": `<w:ind w:left="${h}" w:right="0" w:hanging="${h}"/>` }, PPR_ORDER);
+        count++;
+    }
+    return count;
 }

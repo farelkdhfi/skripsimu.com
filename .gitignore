@@ -12,6 +12,9 @@
 
 # testing
 /coverage
+# dokumen uji berisi data pribadi (nama, NPM, tanda tangan, foto): jangan di-commit
+/test-docs/*
+!/test-docs/cases.json
 
 # next.js
 /.next/

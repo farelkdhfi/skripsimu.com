@@ -10,7 +10,8 @@ import { Input } from "@/components/ui/input";
 import { Field, selectCls, inputCls } from "@/components/shared/field";
 import { ProcessingProgress } from "@/components/shared/processing-progress";
 import { FileDropzone } from "@/features/file-upload/components/file-dropzone";
-import { formatConfigSchema, defaultFormatConfig, type FormatConfig } from "../schemas/format-config";
+import { formatConfigSchema, defaultFormatConfig, configForPreset, type FormatConfig } from "../schemas/format-config";
+import { PRESETS, presetById } from "../presets";
 import { useFormatThesis } from "../hooks/use-format-thesis";
 import { ResultView } from "./result-view";
 
@@ -21,17 +22,45 @@ const NUMS = [
   { name: "marginRight", label: "Margin kanan (cm)", step: 0.1 },
   { name: "fontSize", label: "Ukuran font (pt)", step: 1 },
   { name: "lineSpacing", label: "Spasi baris", step: 0.1 },
-  { name: "indent", label: "Indentasi paragraf (cm)", step: 0.05 },
+  { name: "indent", label: "Indentasi paragraf (cm)", step: 0.01 },
+  { name: "chapterSpaceAfter", label: "Jarak setelah judul bab (baris)", step: 0.5 },
+  { name: "tableFontSize", label: "Font isi tabel (pt)", step: 1 },
+  { name: "captionFontSize", label: "Font judul tabel/gambar (pt)", step: 1 },
+  { name: "referenceHanging", label: "Gantungan daftar pustaka (cm)", step: 0.01 },
   { name: "coverTitleSize", label: "Font judul sampul (pt)", step: 1 },
   { name: "coverInstitutionSize", label: "Font identitas kampus (pt)", step: 1 },
+] as const;
+
+const SELECTS = [
+  { name: "lineRule", label: "Jenis spasi", options: [["auto", "Kelipatan (1,5 / 2)"], ["exact", "Pasti (exactly pt)"]] },
+  { name: "chapterLabel", label: "Nomor bab", options: [["bab", "BAB I ↵ JUDUL"], ["roman", "I ↵ JUDUL"]] },
+  { name: "headingLineSpacing", label: "Spasi judul", options: [["single", "Tunggal"], ["body", "Sama dengan isi"]] },
+  { name: "frontNumberingFrom", label: "Nomor halaman awal", options: [["first", "Sejak setelah sampul"], ["preface", "Sejak Kata Pengantar"]] },
+  { name: "tableCaptionAlign", label: "Judul tabel", options: [["left", "Rata kiri"], ["center", "Rata tengah"]] },
+  { name: "figureCaptionAlign", label: "Judul gambar", options: [["center", "Rata tengah"], ["left", "Rata kiri"]] },
+  { name: "tableNumericAlign", label: "Angka di tabel", options: [["center", "Rata tengah"], ["right", "Rata kanan"]] },
+  { name: "captionNumbering", label: "Nomor tabel/gambar", options: [["chapter", "Per bab (Tabel 2.1)"], ["global", "Berurutan (Tabel 1)"]] },
+  { name: "captionSeparator", label: "Setelah nomor", options: [["space", "Spasi (Tabel 1 Judul)"], ["period", "Titik (Tabel 1. Judul)"]] },
+  { name: "figureLabel", label: "Sebutan gambar", options: [["auto", "Ikuti dokumen"], ["Gambar", "Gambar"], ["Ilustrasi", "Ilustrasi"]] },
+  { name: "listStyle", label: "Format daftar isi", options: [["word", "Daftar isi otomatis Word"], ["columns", "Kolom (nomor | judul | halaman)"]] },
+  { name: "listMarkers", label: "Penanda butir daftar", options: [["uniform", "Diseragamkan"], ["keep", "Ikuti dokumen (1), a., …"]] },
+  { name: "listLayout", label: "Daftar bertingkat", options: [["nested", "Menjorok per tingkat"], ["flat", "Rata: semua penanda di margin"]] },
 ] as const;
 
 const CHECKS = [
   { name: "chapterUppercase", label: "Judul bab huruf kapital" },
   { name: "romanFrontMatter", label: "Romawi untuk bagian awal" },
+  { name: "abstractIndent", label: "Abstrak memakai indentasi" },
+  { name: "referenceGap", label: "Baris kosong antar pustaka" },
   { name: "normalizeTables", label: "Rapikan tata letak tabel" },
   { name: "cleanupBlankPages", label: "Bersihkan halaman kosong" },
   { name: "coverInstitutionUppercase", label: "Identitas kampus huruf kapital" },
+  { name: "coverInstitutionBold", label: "Identitas kampus tebal" },
+  { name: "coverTitleUppercase", label: "Judul sampul huruf kapital" },
+  { name: "coverNameUppercase", label: "Nama penulis huruf kapital" },
+  { name: "coverIdentityBold", label: "Nama & NPM tebal" },
+  { name: "coverAuthorLabel", label: "Label \"Disusun oleh\" di sampul" },
+  { name: "coverTranslationSameSize", label: "Judul terjemahan sama besar" },
 ] as const;
 
 function StepTitle({ n, children }: { n: number; children: ReactNode }) {
@@ -46,9 +75,12 @@ function StepTitle({ n, children }: { n: number; children: ReactNode }) {
 export function FormatterWorkspace() {
   const [file, setFile] = useState<File | null>(null);
   const mutation = useFormatThesis();
-  const { register, handleSubmit, formState: { errors } } = useForm<FormatConfig>({
+  const { register, handleSubmit, reset, getValues, watch, formState: { errors } } = useForm<FormatConfig>({
     resolver: zodResolver(formatConfigSchema), defaultValues: defaultFormatConfig,
   });
+
+  const preset = presetById(watch("presetId"));
+  const applyPreset = (id: string) => reset({ ...configForPreset(id), docType: getValues("docType") });
 
   const onSubmit = (config: FormatConfig) => file && mutation.mutate({ file, config });
 
@@ -87,6 +119,21 @@ export function FormatterWorkspace() {
         <Card className="rounded-[2rem] border-0 bg-white shadow-none">
           <CardHeader><StepTitle n={2}>Aturan format</StepTitle></CardHeader>
           <CardContent className="space-y-5">
+            <Field label="Pedoman kampus">
+              <select className={selectCls} {...register("presetId", { onChange: (e) => applyPreset(e.target.value) })}>
+                {PRESETS.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </Field>
+            {preset.id !== "umum" && (
+              <div className="space-y-2 rounded-2xl bg-orange-50 p-4 text-xs leading-relaxed text-neutral-700">
+                <p className="font-medium text-neutral-900">{preset.source}</p>
+                <ul className="list-disc space-y-1 pl-4">
+                  {preset.notes.map((n) => <li key={n}>{n}</li>)}
+                </ul>
+                <p className="text-neutral-500">Semua nilai di bawah sudah diisi dari pedoman dan tetap bisa diubah.</p>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               <Field label="Ukuran kertas">
                 <select className={selectCls} {...register("paper")}><option>A4</option><option>Letter</option></select>
@@ -105,6 +152,13 @@ export function FormatterWorkspace() {
               {NUMS.map((n) => (
                 <Field key={n.name} label={n.label} error={errors[n.name]?.message}>
                   <Input type="number" step={n.step} className={inputCls} {...register(n.name, { valueAsNumber: true })} />
+                </Field>
+              ))}
+              {SELECTS.map((s) => (
+                <Field key={s.name} label={s.label}>
+                  <select className={selectCls} {...register(s.name)}>
+                    {s.options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                  </select>
                 </Field>
               ))}
               <Field label="Format sitasi">

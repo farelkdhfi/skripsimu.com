@@ -111,7 +111,7 @@ export type MinorHeadings = {
   ids: Set<number>;
   count: number;
   /** Dipanggil SETELAH applyFormat/applyListLayout: format judul tingkat 4 diterapkan. */
-  apply: (o: { rep: ApplyReport; font: string; halfPts: number }) => VerifyRegion[];
+  apply: (o: { rep: ApplyReport; font: string; halfPts: number; line?: number }) => VerifyRegion[];
 };
 
 export async function detectMinorHeadings(
@@ -185,7 +185,7 @@ export async function detectMinorHeadings(
 
   const saved = new Map<ParaNode, string>(accepted.map((c) => [c.p, c.p.xml]));
 
-  const apply: MinorHeadings["apply"] = ({ rep, font, halfPts }) => {
+  const apply: MinorHeadings["apply"] = ({ rep, font, halfPts, line = 240 }) => {
     const regions: VerifyRegion[] = [];
     const order = new Map<string, number>();
     for (const c of accepted) {
@@ -211,7 +211,8 @@ export async function detectMinorHeadings(
 
       formatParagraph(p, {
         styleId: c.kind === "styled" ? undefined : null,
-        align: "left", line: 240, left: 0, right: 0, firstLine: 0, before: 180, after: 120,
+        align: "left", line, left: 0, right: 0, firstLine: 0,
+        before: line > 240 ? 0 : 180, after: line > 240 ? 0 : 120,
         keepNext: true, keepLines: true,
       }, {
         font, size: halfPts, bold: true, caps: false, color: null, underline: false,

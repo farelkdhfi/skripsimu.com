@@ -167,13 +167,26 @@ const SMALL_WORDS = new Set([
   "of", "and", "or", "the", "in", "on", "for", "to", "vs", "a", "an", "at", "by",
 ]);
 const WORD_RE = /[A-Za-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u00FF][A-Za-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u00FF'\u2019]*/g;
-const LABEL_RE = /^(tabel|table|tbl\.?|gambar|gbr\.?|figure|fig\.?|grafik|bagan|diagram)\s*[.:]?\s*(?:[A-Za-z]{1,2}[.\-]?)?\d+(?:\s?[.\-]\s?\d+)*\s*[.:\u2013\u2014-]?\s*/i;
+const LABEL_RE = /^(tabel|table|tbl\.?|gambar|gbr\.?|ilustrasi|figure|fig\.?|grafik|bagan|diagram)\s*[.:]?\s*(?:[A-Za-z]{1,2}[.\-]?)?\d+(?:\s?[.\-]\s?\d+)*\s*[.:\u2013\u2014-]?\s*/i;
 
 /** "TABEL 3.5 KRITERIA RATA-RATA SKOR" → "Tabel 3.5 Kriteria Rata-Rata Skor". */
 /** Title Case umum: kata sambung kecil, akronim dipertahankan kecuali teks kapital semua. */
+/** Frasa Latin baku: hurufnya dipertahankan seperti aslinya ("In vitro", "et al."). */
+
+/**
+ * Title Case judul. Aturannya berdasarkan gaya penulis, bukan daftar kata:
+ *  - kapital semua / huruf kecil semua / gaya kalimat → Title Case penuh;
+ *  - sebagian besar kata sudah berhuruf awal kapital → huruf kecil yang tersisa dianggap
+ *    disengaja (nama spesies, "in vitro", satuan, "pH") dan TIDAK dikapitalkan; hanya kata
+ *    tugas ("Dalam", "Terhadap") yang dikecilkan.
+ */
 export function titleCaseText(s: string, allCapsHint?: boolean): string {
   const letters = s.replace(/[^A-Za-z]/g, "");
   const allCaps = allCapsHint ?? (letters.length > 3 && letters === letters.toUpperCase());
+  const words = s.match(WORD_RE) ?? [];
+  const content = words.slice(1).filter((w) => !SMALL_WORDS.has(w.toLowerCase()));
+  const lowered = content.filter((w) => w[0] !== w[0].toUpperCase()).length;
+  const respectLower = !allCaps && content.length > 0 && lowered / content.length < 0.6;
   let first = true;
   return s.replace(WORD_RE, (w) => {
     const isFirst = first;
@@ -181,6 +194,7 @@ export function titleCaseText(s: string, allCapsHint?: boolean): string {
     if (!allCaps && w.length > 1 && (w === w.toUpperCase() || /[A-Z]/.test(w.slice(1)))) return w;
     const lower = w.toLowerCase();
     if (!isFirst && SMALL_WORDS.has(lower)) return lower;
+    if (respectLower && w === lower) return w;
     return lower[0].toUpperCase() + lower.slice(1);
   });
 }
@@ -196,6 +210,18 @@ export function titleCaseCaption(s: string): string {
 
 const decode = (s: string) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");
 
+/** Per `w:t`: teks cetak miring (istilah asing / nama ilmiah) hurufnya tidak diubah. */
+function italicMask(xml: string, count: number): boolean[] {
+  const mask: boolean[] = [];
+  for (const m of xml.matchAll(/<w:r(?:\s[^>]*)?>([\s\S]*?)<\/w:r>/g)) {
+    const rPr = /^\s*<w:rPr>([\s\S]*?)<\/w:rPr>/.exec(m[1])?.[1] ?? "";
+    const it = /<w:i(?:\s+w:val="(?:1|true|on)")?\s*\/>/.test(rPr);
+    for (const _ of m[1].matchAll(/<w:t(?:\s[^>]*)?>/g)) mask.push(it);
+  }
+  if (mask.length !== count || mask.every(Boolean)) return new Array(count).fill(false);
+  return mask;
+}
+
 /** Terapkan transformasi huruf ke teks paragraf tanpa merusak run/format. */
 export function retext(xml: string, fn: (s: string) => string): string {
   const re = /<w:t(\s[^>]*)?>([\s\S]*?)<\/w:t>/g;
@@ -203,11 +229,13 @@ export function retext(xml: string, fn: (s: string) => string): string {
   const full = texts.join("");
   const out = fn(full);
   if (out === full || out.length !== full.length) return xml;
+  const keep = italicMask(xml, texts.length);
   let pos = 0;
   let k = 0;
   return xml.replace(re, (_m, attr) => {
-    const t = texts[k++];
-    const piece = out.slice(pos, pos + t.length);
+    const t = texts[k];
+    const piece = keep[k] ? t : out.slice(pos, pos + t.length);
+    k++;
     pos += t.length;
     return `<w:t${attr ?? ""}>${escapeXml(piece)}</w:t>`;
   });
@@ -295,6 +323,8 @@ export function detectTableNotes(
       const labelsNext = nextContent(k)?.kind === "table" && !head && !symbol && !marker;
       if (labelsNext || (n.allBold && !head)) break;
 
+      // Kalimat isi yang panjang (atau beberapa kalimat) bukan catatan, walau hurufnya kecil.
+      if (!head && !symbol && (txt.length > 300 || (txt.length > 160 && /[.!?]\s+\S/.test(txt)))) break;
       const short = txt.length <= 200;
       const ok = count === 0
         ? head || symbol || (small && txt.length <= 300)

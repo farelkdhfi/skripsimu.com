@@ -27,8 +27,14 @@ export function alignLabelLines(
         if (it.zone !== "front" && it.zone !== "back") return false;
         if (n.hasNumbering || n.hasDrawing || n.hasField) return false;
         const t = n.text.replace(/\s+/g, " ").trim();
-        if (!t || t.length > 200 || (t.match(/[:：]/g) ?? []).length !== 1) return false;
-        return LV_RAW_RE.test(leadingRaw(n.xml, 80));
+        if (!t || t.length > 250) return false;
+        // Cukup titik dua PERTAMA yang jadi pemisah label; isi boleh memuat titik dua
+        // lagi ("Judul Skripsi : … Cairan Rumen: In vitro").
+        const raw = leadingRaw(n.xml, 80);
+        const m = LV_RAW_RE.exec(raw);
+        if (!m) return false;
+        // "Pukul 10:30" bukan label.
+        return !(/\d$/.test(m[1].trim()) && /^\d/.test(raw.slice(m[0].length)));
     };
 
     let group: ParaNode[] = [];
@@ -37,11 +43,19 @@ export function alignLabelLines(
             const labels = group.map((p) => LV_RAW_RE.exec(leadingRaw(p.xml, 80))![1].trim());
             const longest = Math.max(...labels.map((l) => l.length));
             const labelW = Math.min(3400, Math.max(1134, longest * charTw + 170));
+            // Titik awal baris pertama = left − hanging + firstLine (bukan w:left mentah:
+            // "left=2160 hanging=2160" artinya label mulai di 0). Satu nilai untuk
+            // sekelompok baris supaya labelnya mulai di garis yang sama.
+            const startOf = (p: ParaNode) => {
+                const pPr = /<w:pPr>[\s\S]*?<\/w:pPr>/.exec(p.xml)?.[0] ?? "";
+                const ind = /<w:ind\b[^>]*>/.exec(pPr)?.[0] ?? "";
+                const v = (a: string) => Number(new RegExp(`w:${a}="(-?\\d+)"`).exec(ind)?.[1] ?? 0);
+                return Math.max(0, (v("left") || v("start")) - v("hanging") + v("firstLine"));
+            };
+            const base = Math.min(...group.map(startOf));
             group.forEach((p, k) => {
                 const before = paragraphLine(p.xml);
                 const m = LV_RAW_RE.exec(leadingRaw(p.xml, 80))!;
-                const pPr = /<w:pPr>[\s\S]*?<\/w:pPr>/.exec(p.xml)?.[0] ?? "";
-                const base = Number(/<w:ind\b[^>]*w:(?:left|start)="(\d+)"/.exec(pPr)?.[1] ?? 0);
                 const rPr = /<w:r(?:\s[^>]*)?>\s*(<w:rPr>[\s\S]*?<\/w:rPr>)/.exec(p.xml)?.[1] ?? "";
                 let xml = removeLeading(p.xml, m[0].length);
                 const e = xml.indexOf("</w:pPr>");

@@ -41,7 +41,7 @@ function prepend(xml: string, runs: string) {
  * Content control yang membungkus field TOC dilepas: isinya jadi paragraf biasa
  * di body, supaya isi daftarnya bisa disusun ulang. Teks tidak berubah.
  */
-function unwrapTocControls(model: DocModel): number {
+export function unwrapTocControls(model: DocModel): number {
   let count = 0;
   const list = model.body;
   for (let i = 0; i < list.length; i++) {
@@ -94,7 +94,7 @@ function retargetToc(xml: string, code: string): string {
 const TOC_CODE: [RegExp, string][] = [
   [/\bisi\b/i, 'TOC \\o "1-3" \\h \\z \\u \\f c'],
   [/tabel/i, "TOC \\h \\z \\f t"],
-  [/gambar|grafik|bagan/i, "TOC \\h \\z \\f g"],
+  [/gambar|grafik|bagan|ilustrasi/i, "TOC \\h \\z \\f g"],
   [/lampiran/i, "TOC \\h \\z \\f l"],
 ];
 const NUMBERED_APPENDIX = /^lampiran\s*([0-9]+|[a-z])\b/i;

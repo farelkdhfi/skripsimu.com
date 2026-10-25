@@ -1,0 +1,349 @@
+/**
+ * Uji regresi formatter skripsi.
+ *
+ *   npm run test:docs                       → format semua .docx di test-docs/, periksa, bandingkan snapshot
+ *   npm run test:docs -- --update           → setujui hasil sekarang sebagai snapshot baru
+ *   npm run test:docs -- riki               → hanya file yang namanya memuat "riki"
+ *   npm run test:docs -- dokumen --trace    → tunjukkan di tahap mana teks mulai berubah
+ *
+ * Tanpa AI, jadi hasilnya deterministik. Hasil format disimpan di test-docs/__out__/.
+ */
+import { readFile, writeFile, mkdir, readdir } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import path from "node:path";
+import JSZip from "jszip";
+import { transformDocx } from "../src/features/thesis-formatter/docx/transform";
+import { configForPreset } from "../src/features/thesis-formatter/schemas/format-config";
+import { flatten, parseDocument, type ParaNode, type TableNode } from "../src/features/thesis-formatter/docx/document-model";
+import { fingerprint } from "../src/features/thesis-formatter/docx/verify";
+import { countAutoSpacing } from "../src/features/thesis-formatter/docx/autospacing";
+
+const ROOT = path.resolve("test-docs");
+const OUT = path.join(ROOT, "__out__");
+const SNAP = path.join(ROOT, "__snapshots__");
+const args = process.argv.slice(2);
+const UPDATE = args.includes("--update");
+const TRACE = args.includes("--trace");
+const FILTER = args.filter((a) => !a.startsWith("--")).map((a) => a.toLowerCase());
+
+type Case = { preset?: string; config?: Record<string, unknown> };
+
+/* ------------------------------------------------------------------ */
+/* Pembacaan XML ringkas                                                */
+/* ------------------------------------------------------------------ */
+
+const decode = (s: string) => s
+    .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'").replace(/&amp;/g, "&");
+
+function textOf(xml: string): string {
+    let out = "";
+    for (const m of xml.matchAll(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>|<w:tab\s*\/>|<w:br(?![^>]*w:type="page")[^>]*\/>/g)) {
+        out += m[1] !== undefined ? decode(m[1]) : m[0].startsWith("<w:tab") ? "→" : "↵";
+    }
+    return out.replace(/\s+/g, " ").trim();
+}
+
+/** pPr milik paragraf sendiri, tanpa rPr penanda paragraf, sectPr, dan riwayat revisi. */
+function ownPPr(xml: string): string {
+    const s = xml.indexOf("<w:pPr>");
+    const e = s === -1 ? -1 : xml.indexOf("</w:pPr>", s);
+    if (s === -1 || e === -1) return "";
+    return xml.slice(s, e)
+        .replace(/<w:rPr>[\s\S]*?<\/w:rPr>/g, "")
+        .replace(/<w:sectPr\b[\s\S]*?<\/w:sectPr>/g, "")
+        .replace(/<w:pPrChange\b[\s\S]*?<\/w:pPrChange>/g, "");
+}
+
+const attr = (tag: string, name: string) => new RegExp(`w:${name}="([^"]*)"`).exec(tag)?.[1];
+
+function describePara(p: ParaNode): string {
+    const pPr = ownPPr(p.xml);
+    const el = (t: string) => new RegExp(`<w:${t}\\b[^>]*\\/?>`).exec(pPr)?.[0] ?? "";
+    const style = attr(el("pStyle"), "val") ?? "-";
+    const jc = attr(el("jc"), "val") ?? "-";
+    const ind = el("ind");
+    const indS = ind
+        ? `${attr(ind, "left") ?? attr(ind, "start") ?? 0}/${attr(ind, "hanging") ? "h" + attr(ind, "hanging") : "f" + (attr(ind, "firstLine") ?? 0)}`
+        : "-";
+    const sp = el("spacing");
+    const spS = sp
+        ? `${attr(sp, "before") ?? "."}/${attr(sp, "after") ?? "."}/${attr(sp, "line") ?? "."}${(attr(sp, "lineRule") ?? "")[0] ?? ""}`
+        : "-";
+    const tabs = [...(/<w:tabs>([\s\S]*?)<\/w:tabs>/.exec(pPr)?.[1] ?? "").matchAll(/w:pos="(-?\d+)"/g)].map((m) => m[1]).join(",");
+    const flags = [
+        /<w:pageBreakBefore(?:\s+w:val="(?:1|true|on)")?\s*\/>/.test(pPr) ? "PBB" : "",
+        /<w:br\b[^>]*w:type="page"/.test(p.xml) ? "PB" : "",
+        /<w:sectPr\b/.test(p.xml) ? "SECT" : "",
+        /<w:numPr>[\s\S]*?<w:numId\s+w:val="(?!0")/.test(pPr) ? "NUM" : "",
+        /<wp:inline\b/.test(p.xml) ? "IMG" : "",
+        /<wp:anchor\b/.test(p.xml) ? "FLOAT" : "",
+        /<w:keepNext(?:\s+w:val="(?:1|true|on)")?\s*\/>/.test(pPr) ? "KN" : "",
+        /<w:instrText[^>]*>\s*SEQ\b/.test(p.xml) ? "SEQ" : "",
+        /<w:instrText[^>]*>\s*(TOC|PAGEREF)\b/.test(p.xml) ? "TOCF" : "",
+    ].filter(Boolean).join(" ");
+    const sizes = [...new Set([...p.xml.slice(p.xml.indexOf("</w:pPr>") + 1).matchAll(/<w:sz\s+w:val="(\d+)"/g)].map((m) => m[1]))].join(",");
+    return `P ${style} | ${jc} | ind ${indS} | sp ${spS}${tabs ? ` | tab ${tabs}` : ""}${sizes ? ` | sz ${sizes}` : ""}${flags ? ` | ${flags}` : ""} | ${textOf(p.xml).slice(0, 70)}`;
+}
+
+function describeTable(t: TableNode): string {
+    const cols = Math.max(0, ...t.rows.map((r) => r.cells.length));
+    const tb = /<w:tblBorders>([\s\S]*?)<\/w:tblBorders>/.exec(t.props ?? "")?.[1] ?? "";
+    const lines = [...tb.matchAll(/<w:(top|bottom|left|right|insideH|insideV)\b[^>]*w:val="([^"]+)"/g)]
+        .filter((m) => m[2] !== "nil" && m[2] !== "none").map((m) => m[1][0] + (m[1].startsWith("inside") ? m[1].slice(-1) : ""));
+    const text = t.rows.slice(0, 2).map((r) => r.cells.map((c) => flatten(c.children)
+        .map((x) => (x.kind === "paragraph" ? textOf(x.xml) : "")).join(" ")).join("|")).join(" / ");
+    return `T ${t.rows.length}x${cols} | border ${lines.join("") || "none"} | ${text.slice(0, 60)}`;
+}
+
+function describeSections(xml: string): string[] {
+    return [...xml.matchAll(/<w:sectPr\b[\s\S]*?<\/w:sectPr>/g)].map((m, i) => {
+        const s = m[0];
+        const pg = /<w:pgNumType\b[^>]*>/.exec(s)?.[0] ?? "";
+        const sz = /<w:pgSz\b[^>]*>/.exec(s)?.[0] ?? "";
+        const mar = /<w:pgMar\b[^>]*>/.exec(s)?.[0] ?? "";
+        return `S${i} type=${attr(/<w:type\b[^>]*>/.exec(s)?.[0] ?? "", "val") ?? "nextPage"} num=${attr(pg, "fmt") ?? "-"}/${attr(pg, "start") ?? "-"}` +
+            ` ${attr(sz, "orient") ?? "portrait"} mar=${attr(mar, "top")},${attr(mar, "bottom")},${attr(mar, "left")},${attr(mar, "right")}` +
+            ` footer=${(s.match(/<w:footerReference\b/g) ?? []).length}${/<w:titlePg\b/.test(s) ? " titlePg" : ""}`;
+    });
+}
+
+/* ------------------------------------------------------------------ */
+/* Pemeriksaan wajib                                                    */
+/* ------------------------------------------------------------------ */
+
+function xmlProblem(xml: string): string | null {
+    const stack: string[] = [];
+    const re = /<!\[CDATA\[[\s\S]*?\]\]>|<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<(\/?)([A-Za-z_][\w.:-]*)((?:\s+[^\s=>]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*(\/?)>/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(xml))) {
+        if (!m[2]) continue;
+        if (m[4]) continue;
+        if (m[1]) {
+            const top = stack.pop();
+            if (top !== m[2]) return `</${m[2]}> tidak cocok dengan <${top ?? "?"}> (karakter ${m.index})`;
+        } else stack.push(m[2]);
+    }
+    if (stack.length) return `<${stack[stack.length - 1]}> tidak ditutup`;
+    const amp = /&(?!(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);)/.exec(xml);
+    if (amp) return `karakter & tanpa escape (karakter ${amp.index})`;
+    return null;
+}
+
+async function hardChecks(zip: JSZip, docXml: string): Promise<string[]> {
+    const fails: string[] = [];
+
+    for (const name of Object.keys(zip.files)) {
+        if (!/\.(xml|rels)$/.test(name)) continue;
+        const p = xmlProblem(await zip.file(name)!.async("string"));
+        if (p) fails.push(`XML rusak di ${name}: ${p}`);
+    }
+
+    const rels = (await zip.file("word/_rels/document.xml.rels")?.async("string")) ?? "";
+    const ids = new Set([...rels.matchAll(/Id="([^"]+)"/g)].map((m) => m[1]));
+    const missing = [...new Set([...docXml.matchAll(/r:(?:id|embed|link)="([^"]+)"/g)].map((m) => m[1]))].filter((id) => !ids.has(id));
+    if (missing.length) fails.push(`Relasi tidak ada di document.xml.rels: ${missing.join(", ")}`);
+
+    for (const m of rels.matchAll(/<Relationship\b[^>]*>/g)) {
+        const target = /Target="([^"]+)"/.exec(m[0])?.[1];
+        if (!target || /TargetMode="External"/.test(m[0]) || /^[a-z]+:/i.test(target)) continue;
+        const file = path.posix.normalize(target.startsWith("/") ? target.slice(1) : path.posix.join("word", target));
+        if (!zip.file(file)) fails.push(`File relasi tidak ada: ${file}`);
+    }
+
+    const types = (await zip.file("[Content_Types].xml")?.async("string")) ?? "";
+    for (const name of Object.keys(zip.files)) {
+        if (!/^word\/(header|footer)[^/]*\.xml$/.test(name)) continue;
+        if (!types.includes(`PartName="/${name}"`)) fails.push(`Content type tidak terdaftar untuk ${name}`);
+    }
+
+    const stray = [...docXml.matchAll(/<w:t(?:\s[^>]*)?>\s*(period|space|undefined|null|NaN|\[object Object\])\s*<\/w:t>/g)];
+    if (stray.length) fails.push(`${stray.length} run berisi teks nyasar "${stray[0][1]}" (nilai config/variabel tertulis ke dokumen)`);
+
+    return fails;
+}
+
+/** Peringatan: kemungkinan halaman kosong (dua pindah halaman tanpa isi di antaranya). */
+function blankPageWarnings(blocks: (ParaNode | TableNode)[]): string[] {
+    const out: string[] = [];
+    let content = true;
+    for (const n of blocks) {
+        if (n.kind === "table") { content = true; continue; }
+        const pPr = ownPPr(n.xml);
+        if (/<w:pageBreakBefore(?:\s+w:val="(?:1|true|on)")?\s*\/>/.test(pPr) && !content) {
+            out.push(`kemungkinan halaman kosong sebelum "${textOf(n.xml).slice(0, 40)}"`);
+        }
+        if (textOf(n.xml) || /<w:drawing[\s>]|<w:pict[\s>]|<w:object[\s>]/.test(n.xml)) content = true;
+        const sect = /<w:sectPr\b[\s\S]*?<\/w:sectPr>/.exec(n.xml)?.[0];
+        const breaks = /<w:br\b[^>]*w:type="page"/.test(n.xml) || (sect && !/<w:type\s+w:val="continuous"/.test(sect));
+        if (breaks) {
+            if (!content) out.push(`kemungkinan halaman kosong di sekitar "${textOf(n.xml).slice(0, 40) || "(paragraf kosong)"}"`);
+            content = false;
+        }
+    }
+    return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* Snapshot & diff                                                      */
+/* ------------------------------------------------------------------ */
+
+function diff(a: string[], b: string[]): string[] {
+    let s = 0;
+    while (s < a.length && s < b.length && a[s] === b[s]) s++;
+    let e = 0;
+    while (e < a.length - s && e < b.length - s && a[a.length - 1 - e] === b[b.length - 1 - e]) e++;
+    const A = a.slice(s, a.length - e);
+    const B = b.slice(s, b.length - e);
+    const dp = Array.from({ length: A.length + 1 }, () => new Int32Array(B.length + 1));
+    for (let i = A.length - 1; i >= 0; i--)
+        for (let j = B.length - 1; j >= 0; j--)
+            dp[i][j] = A[i] === B[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    const out: string[] = [];
+    let i = 0;
+    let j = 0;
+    while (i < A.length && j < B.length) {
+        if (A[i] === B[j]) { i++; j++; }
+        else if (dp[i + 1][j] >= dp[i][j + 1]) out.push(`  - ${A[i++]}`);
+        else out.push(`  + ${B[j++]}`);
+    }
+    while (i < A.length) out.push(`  - ${A[i++]}`);
+    while (j < B.length) out.push(`  + ${B[j++]}`);
+    return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* Main                                                                 */
+/* ------------------------------------------------------------------ */
+
+const normName = (s: string) => s.toLowerCase().replace(/\.docx$/, "").replace(/[\s_\-]+/g, " ").trim();
+
+async function main() {
+    if (!existsSync(ROOT)) { console.error(`Folder ${ROOT} belum ada.`); process.exit(1); }
+    await mkdir(OUT, { recursive: true });
+    await mkdir(SNAP, { recursive: true });
+    const cases: Record<string, Case> = existsSync(path.join(ROOT, "cases.json"))
+        ? JSON.parse(await readFile(path.join(ROOT, "cases.json"), "utf8")) : {};
+
+    const all = (await readdir(ROOT)).filter((f) => f.toLowerCase().endsWith(".docx") && !f.startsWith("~$"));
+    // Nama di cases.json dicocokkan longgar: huruf besar/kecil, spasi/_/- dianggap sama, boleh sebagian nama.
+    const used = new Set<string>();
+    const caseOf = (file: string): Case => {
+        const k = normName(file);
+        const hit = Object.keys(cases).find((key) => normName(key) === k) ??
+            Object.keys(cases).find((key) => k.includes(normName(key)));
+        if (hit) { used.add(hit); return cases[hit]; }
+        return {};
+    };
+    const files = all.filter((f) => !FILTER.length || FILTER.some((x) => f.toLowerCase().includes(x)));
+    if (!files.length) { console.error("Tidak ada .docx di test-docs/."); process.exit(1); }
+
+    let failed = 0;
+    let changed = 0;
+    for (const file of files) {
+        const c = caseOf(file);
+        const preset = c.preset ?? "umum";
+        const config = { ...configForPreset(preset), ...(c.config ?? {}) } as Parameters<typeof transformDocx>[1];
+        const base = file.replace(/\.docx$/i, "");
+        const started = Date.now();
+        let lines: string[] = [];
+        const fails: string[] = [];
+        let warns: string[] = [];
+        const stages: { name: string; xml: string }[] = [];
+        let originalXml = "";
+        let finalXml = "";
+        let unexplained: { a: string[]; b: string[] } | null = null;
+        let saveNote = "";
+
+        try {
+            const input = await readFile(path.join(ROOT, file));
+            originalXml = (await (await JSZip.loadAsync(input)).file("word/document.xml")?.async("string")) ?? "";
+            const result = await transformDocx(input, config, TRACE ? { trace: (name, xml) => stages.push({ name, xml }) } : {});
+            const outFile = path.join(OUT, `${base}-FORMATTED-${preset}.docx`);
+            try {
+                await writeFile(outFile, result.buffer);
+            } catch (e) {
+                const code = (e as NodeJS.ErrnoException).code;
+                if (code !== "EBUSY" && code !== "EPERM") throw e;
+                // File hasil lama sedang dibuka di Word: simpan dengan nama lain, pemeriksaan tetap jalan.
+                const alt = outFile.replace(/\.docx$/, `-${Date.now()}.docx`);
+                await writeFile(alt, result.buffer);
+                saveNote = `file hasil sedang dibuka di Word, disimpan sebagai ${path.basename(alt)}`;
+            }
+            const zip = await JSZip.loadAsync(result.buffer);
+            finalXml = await zip.file("word/document.xml")!.async("string");
+
+            for (const i of result.issues) if (i.level === "error") fails.push(`Verifikasi: ${i.message}`);
+            unexplained = result.unexplained;
+            fails.push(...await hardChecks(zip, finalXml));
+
+            const blocks = flatten(parseDocument(finalXml).body);
+            warns = blankPageWarnings(blocks);
+            const auto = countAutoSpacing(parseDocument(finalXml), (await zip.file("word/styles.xml")?.async("string")) ?? "");
+            if (auto.count) warns.push(`${auto.count} paragraf masih memakai spasi otomatis dari style (${auto.styles.join(", ")}) — celah tersembunyi`);
+            lines = [
+                `# preset: ${preset}`,
+                ...describeSections(finalXml),
+                ...blocks.map((n) => (n.kind === "paragraph" ? describePara(n) : describeTable(n))),
+                ...result.notes.map((n) => `# catatan: ${n}`),
+            ];
+        } catch (err) {
+            fails.push(`Formatter error: ${(err as Error).stack ?? err}`);
+        }
+
+        const snapPath = path.join(SNAP, `${base}.${preset}.txt`);
+        const label = `${file} [${preset}] (${((Date.now() - started) / 1000).toFixed(1)} dtk)`;
+        let d: string[] = [];
+        if (lines.length) {
+            if (UPDATE || !existsSync(snapPath)) {
+                await writeFile(snapPath, lines.join("\n") + "\n");
+            } else {
+                d = diff((await readFile(snapPath, "utf8")).trimEnd().split("\n"), lines);
+            }
+        }
+
+        if (fails.length) failed++;
+        if (d.length) changed++;
+        const status = fails.length ? "GAGAL" : d.length ? "BERUBAH" : UPDATE ? "DISETUJUI" : "OK";
+        console.log(`\n${status.padEnd(9)} ${label}`);
+        for (const f of fails) console.log(`  ✗ ${f}`);
+        if (unexplained) {
+            const dd = diff(unexplained.a, unexplained.b);
+            console.log(`  baris yang berubah TANPA dilaporkan modul (${dd.length}):`);
+            for (const l of dd.slice(0, 20)) console.log(l);
+            if (dd.length > 20) console.log(`  … ${dd.length - 20} lagi`);
+        }
+        if (saveNote) console.log(`  ! ${saveNote}`);
+        for (const w of warns.slice(0, 5)) console.log(`  ! ${w}`);
+        if (d.length) {
+            console.log(`  ${d.length} baris berbeda dari snapshot:`);
+            for (const l of d.slice(0, 80)) console.log(l);
+            if (d.length > 80) console.log(`  … ${d.length - 80} baris lagi`);
+        }
+
+        // Jejak per tahap: baris teks (versi verifikasi) yang berubah di tiap tahap formatter.
+        if (TRACE && originalXml) {
+            console.log("  --- jejak per tahap ---");
+            const linesOf = (xml: string) => fingerprint(xml).text.split("\n");
+            let prev = { name: "00 asli", lines: linesOf(originalXml) };
+            for (const s of [...stages, { name: "12 hasil akhir", xml: finalXml }]) {
+                if (!s.xml) continue;
+                const cur = linesOf(s.xml);
+                const dd = diff(prev.lines, cur);
+                if (dd.length) {
+                    console.log(`  [${prev.name} → ${s.name}] ${dd.length} baris berubah`);
+                    for (const l of dd.slice(0, 14)) console.log(`  ${l}`);
+                    if (dd.length > 14) console.log(`    … ${dd.length - 14} lagi`);
+                }
+                prev = { name: s.name, lines: cur };
+            }
+        }
+    }
+
+    const unused = Object.keys(cases).filter((k) => !used.has(k));
+    if (unused.length && !FILTER.length) console.log(`\n! cases.json tidak cocok dengan file mana pun: ${unused.join(", ")}`);
+    console.log(`\n${files.length} dokumen · ${failed} gagal · ${changed} berubah${changed && !UPDATE ? " (jalankan dengan --update bila perubahan memang benar)" : ""}`);
+    process.exit(failed ? 1 : 0);
+}
+
+main();

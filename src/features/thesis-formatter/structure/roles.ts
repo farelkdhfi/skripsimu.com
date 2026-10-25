@@ -80,7 +80,7 @@ export function frontKindOf(heading: string): FrontKind {
 }
 
 export const LIST_HEADING_RE = new RegExp(
-  "^daftar\\s+(?:isi|tabel|gambar|lampiran|grafik|bagan)" + SUFFIX + "$", "i",
+  "^daftar\\s+(?:isi|tabel|gambar|ilustrasi|lampiran|grafik|bagan)" + SUFFIX + "$", "i",
 );
 
 export const REFERENCE_HEADING_RE = new RegExp(
@@ -103,7 +103,7 @@ const PAGE_NUM_TAIL = /(\.{2,}|\u2026|\t|\s{2,})\s*[\divxlcdm]+\s*$/i;
 const SECTION_RE = /^(\d+)\.(\d+)[.)]?\s+\S/;
 const SUBSECTION_RE = /^(\d+)\.(\d+)\.(\d+)[.)]?\s+\S/;
 const ALPHA_SECTION_RE = /^[A-Z]\.\s+\S/;
-const CAPTION_RE = /^(gambar|gbr\.?|figure|fig\.?|grafik|bagan|diagram|tabel|table|tbl\.?)\s*\.?\s*(?:[A-Za-z]{1,2}[.\-]?)?\d+(?:[.\-]\d+)*\s*[.:]?\s*/i;
+const CAPTION_RE = /^(gambar|gbr\.?|figure|fig\.?|grafik|bagan|diagram|ilustrasi|tabel|table|tbl\.?)\s*\.?\s*(?:[A-Za-z]{1,2}[.\-]?)?\d+(?:[.\-]\d+)*\s*[.:]?\s*/i;
 
 /**
  * Keterangan gambar/tabel memakai Title Case setelah nomornya
@@ -113,7 +113,7 @@ const CAPTION_RE = /^(gambar|gbr\.?|figure|fig\.?|grafik|bagan|diagram|tabel|tab
  * tidak bisa meloloskan bentuk kedua.
  */
 /** Keterangan tanpa nomor: "Tabel Sebaran Populasi …" (judul pendek, tidak diakhiri titik). */
-const UNNUMBERED_CAPTION_RE = /^(tabel|table|gambar|figure)\s+[A-Z][^.]{3,140}$/;
+const UNNUMBERED_CAPTION_RE = /^(tabel|table|gambar|figure|ilustrasi)\s+[A-Z][^.]{3,140}$/;
 
 export function captionKind(t: string): Role | null {
   const m = CAPTION_RE.exec(t);
@@ -137,6 +137,8 @@ export type Signals = {
   captionStyled?: boolean;
   /** Paragraf judul bab bernomor romawi saja ("I" ↵ "PENDAHULUAN"), dari unifyChapterHeadings. */
   chapterHint?: boolean;
+  /** Paragraf hanya memuat gambar MELAYANG (tanda tangan, stempel, foto biodata). */
+  floatingOnly?: boolean;
 };
 
 /**
@@ -168,8 +170,14 @@ export function classifyByRule(s: Signals, zone: Zone, inList = false): Role | n
   if (s.isTable) return null;
   const t = s.text.trim();
 
-  if (s.hasDrawing) return "figure";
+  // Gambar melayang di bagian awal/akhir (tanda tangan, stempel, foto) bukan gambar bernomor:
+  // paragrafnya diperlakukan menurut teksnya. Begitu pula paragraf panjang yang membungkus foto.
+  const floatingText = Boolean(s.floatingOnly) && (zone !== "main" || t.length >= 120);
+  if (s.hasDrawing && !floatingText) return "figure";
   if (!t) return "empty";
+  // Di wilayah halaman DAFTAR ISI/TABEL/GAMBAR/LAMPIRAN semua baris berisi adalah entri daftar —
+  // termasuk kepala kolom ("Bab … Halaman"), baris bab tanpa nomor halaman, dan baris lanjutan.
+  if (inList) return "list_entry";
   if (s.chapterHint) return "chapter";
 
   const bare = t.replace(/[:\s]+$/, "");
@@ -212,17 +220,43 @@ export function scanStructure(signals: Signals[]): { zones: Zone[]; inList: bool
   let zone: Zone = "cover";
   let listing = false;
 
+  const bareOf = (s: Signals) => s.text.trim().replace(/[:\s]+$/, "");
+  const entryAt = (k: number) => {
+    const s = signals[k];
+    const raw = s.text.trim();
+    return !s.isTable && !CHAPTER_LABEL_ONLY_RE.test(bareOf(s)) && (LIST_ENTRY_RE.test(raw) || PAGE_NUM_TAIL.test(raw));
+  };
+  /** Dua paragraf berisi berikutnya. */
+  const ahead = (i: number) => {
+    const out: number[] = [];
+    for (let k = i + 1; k < signals.length && out.length < 2; k++) {
+      if (signals[k].isTable) break;
+      if (signals[k].text.trim()) out.push(k);
+    }
+    return out;
+  };
+
   for (let i = 0; i < signals.length; i++) {
     const s = signals[i];
     if (s.isTable) { zones[i] = zone; inList[i] = listing; continue; }
 
-    const t = s.text.trim().replace(/[:\s]+$/, "");
+    const t = bareOf(s);
     const raw = s.text.trim();
     const entryLike = !CHAPTER_LABEL_ONLY_RE.test(t) &&
       (LIST_ENTRY_RE.test(raw) || (listing && PAGE_NUM_TAIL.test(raw)));
 
-    // Blok daftar berakhir pada baris pertama yang bukan entri.
-    if (listing && t && !entryLike) listing = false;
+    // Wilayah halaman daftar berakhir pada JUDUL SUNGGUHAN, bukan pada baris pertama tanpa
+    // nomor halaman: kepala kolom ("Bab … Halaman"), baris bab ("I  PENDAHULUAN"), dan baris
+    // lanjutan entri panjang tetap bagian daftar. Baris bab dianggap judul sungguhan bila
+    // yang menyusul bukan entri daftar (di daftar isi, baris bab selalu diikuti entri bernomor halaman).
+    if (listing && t && !entryLike) {
+      const named = t.length <= 120 && headingish(t) && (
+        LIST_HEADING_RE.test(t) || FRONT_HEADING_RE.test(t) || REFERENCE_HEADING_RE.test(t) ||
+        (APPENDIX_HEADING_RE.test(t) && t.length <= 60));
+      const chapterish = t.length <= 120 && (Boolean(s.chapterHint) || CHAPTER_RE.test(t));
+      const prose = raw.length >= 150 && /[.!?]$/.test(raw) && !raw.includes("\t");
+      if (named || prose || (chapterish && !ahead(i).some(entryAt))) listing = false;
+    }
 
     // Perpindahan zona hanya dipicu judul sungguhan, bukan barisan daftar isi.
     if (!listing && !entryLike && t.length <= 120) {
