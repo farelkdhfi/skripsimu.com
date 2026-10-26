@@ -1,4 +1,10 @@
 /**
+ * Pengukuran tinggi halaman dengan style FINAL dokumen, dipakai untuk:
+ *  1. sampul: logo diperkecil bila isi sampul meluber (fitCoverPages)
+ *  2. tanda tangan/materai melayang: baris nama di bawahnya diberi jarak agar tidak tertimpa
+ *     (clearFloatingSignatures)
+ *  3. lembar pernyataan: spasi diturunkan bertahap bila tidak muat satu halaman (fitStatementPage)
+ *
  * Halaman sampul harus muat satu halaman. Bila isi satu halaman sampul diperkirakan meluber
  * (mis. tahun terdorong ke halaman baru), gambar terbesar di halaman itu (biasanya logo)
  * diperkecil secukupnya — proporsional, tidak pernah diperbesar, paling kecil MIN_SCALE dari
@@ -11,8 +17,10 @@
  * yang mendorong teks (wrap atas-bawah/persegi), tabel, serta grid baris dokumen.
  * Formatter tidak bisa melihat pemotongan halaman Word secara pasti, jadi dipakai cadangan.
  */
-import { cellParagraphs, flatten, type DocModel, type ParaNode, type TableNode } from "./document-model";
+import { cellParagraphs, flatten, type BlockNode, type DocModel, type ParaNode, type TableNode } from "./document-model";
 import type { PageInfo } from "./page-openers";
+import { startsNewPage, type Zone } from "../structure/roles";
+import { STATEMENT_RE } from "./statement";
 
 const MIN_SCALE = 0.6;
 /** Cadangan agar perkiraan tidak meleset tipis (± setengah baris 12 pt). */
@@ -435,5 +443,173 @@ export function fitCoverPages(model: DocModel, info: PageInfo, stylesXml: string
         out.scaled++;
         out.percent.push(Math.round(k * 100));
     }
+    return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* Tanda tangan & materai melayang                                      */
+/* ------------------------------------------------------------------ */
+
+/** Spasi efektif paragraf (style + langsung), twips. */
+function spacingEff(styles: Styles, p: ParaNode) {
+    const pPr = pPrOf(p.xml);
+    const st = styles.paragraph(/<w:pStyle\s+w:val="([^"]+)"/.exec(pPr)?.[1]);
+    const sp: Spacing = { ...st.spacing, ...defined(spacingOf(pPr)) };
+    return {
+        sp,
+        sz: szOf(rPrIn(pPr)) ?? st.sz,
+        before: sp.autoBefore ? 280 : sp.before ?? 0,
+        after: sp.autoAfter ? 280 : sp.after ?? 0,
+    };
+}
+
+/** Ganti/isi atribut w:spacing (dan buang autospacing/lines yang menimpanya). */
+function setSpacing(xml: string, attrs: Record<string, number | string>): string {
+    const end = xml.indexOf("</w:pPr>");
+    const head = end === -1 ? "" : xml.slice(0, end);
+    let tag = /<w:spacing\b[^>]*\/>/.exec(head)?.[0] ?? "<w:spacing/>";
+    const original = /<w:spacing\b[^>]*\/>/.exec(head)?.[0];
+    for (const [k, v] of Object.entries(attrs)) {
+        tag = tag.replace(new RegExp(`\\s*w:${k}(?:Autospacing|Lines)?="[^"]*"`, "g"), "");
+        tag = tag.replace(/\s*\/>$/, ` w:${k}="${v}"/>`);
+    }
+    if (original) return xml.replace(original, tag);
+    if (end === -1) return xml.replace(/^(<w:p\b[^>]*>)/, `$1<w:pPr>${tag}</w:pPr>`);
+    // w:spacing sebelum w:ind/w:jc/w:rPr agar urutan pPr sah.
+    const at = head.search(/<w:(?:ind|contextualSpacing|mirrorIndents|suppressOverlap|jc|textDirection|textAlignment|textboxTightWrap|outlineLvl|divId|cnfStyle|rPr|sectPr|pPrChange)\b/);
+    return at === -1 ? xml.slice(0, end) + tag + xml.slice(end) : xml.slice(0, at) + tag + xml.slice(at);
+}
+
+const isSignatureFloat = (img: Img) =>
+    img.kind === "anchor" && Math.max(img.cx, img.cy) <= 7 * 567 && img.band !== undefined && !img.band.wraps &&
+    /paragraph|line/.test(img.band.rel) && img.band.offset !== null;
+
+function* blockLists(list: BlockNode[], info: PageInfo, zone: Zone | undefined): Generator<{ list: BlockNode[]; zone: Zone | undefined }> {
+    yield { list, zone };
+    for (const n of list) {
+        if (n.kind === "container") yield* blockLists(n.children, info, zone);
+        else if (n.kind === "table") {
+            const z = info.get(n)?.zone ?? zone;
+            for (const r of n.rows) for (const c of r.cells) yield* blockLists(c.children, info, z);
+        }
+    }
+}
+
+/**
+ * Tanda tangan/materai melayang diposisikan relatif terhadap paragrafnya. Bila spasi di bawahnya
+ * menyusut (spasi baris diseragamkan, baris kosong dihapus), baris nama naik dan tertimpa gambar.
+ * Baris berteks pertama di bawah gambar diberi jarak sebelum secukupnya agar mulai di bawah gambar
+ * (gambar boleh sedikit menumpang ±15% tingginya, ruang kosong bawaan tanda tangan).
+ */
+export function clearFloatingSignatures(model: DocModel, info: PageInfo, stylesXml: string): number {
+    const styles = new Styles(stylesXml);
+    const g = geometry(model.bodySectPr ?? "", null);
+    if (!g) return 0;
+    const heightOf = (p: ParaNode) => {
+        const lay = new Layout(g, styles, () => 1);
+        lay.paragraph(p, g.width);
+        return lay.y;
+    };
+    let changed = 0;
+    for (const { list, zone } of blockLists(model.body, info, undefined)) {
+        list.forEach((n, i) => {
+            if (n.kind !== "paragraph" || !n.hasDrawing) return;
+            const z = info.get(n)?.zone ?? zone;
+            if (z === "cover") return;
+            const floats = imagesOf(n).filter((im) => isSignatureFloat(im) && !/\bbehindDoc="(?:1|true)"/.test(
+                [...n.xml.matchAll(DRAWING_RE)][im.index]?.[0] ?? ""));
+            if (!floats.length) return;
+            const bottom = Math.max(...floats.map((im) => (im.band!.offset ?? 0) + im.cy * 0.85));
+            // Dari atas paragraf jangkar sampai baris berteks berikutnya.
+            let y = heightOf(n) - spacingEff(styles, n).before;
+            let target: ParaNode | null = null;
+            for (let j = i + 1; j < list.length; j++) {
+                const m = list[j];
+                if (m.kind !== "paragraph" || m.hasSectPr || m.hasPageBreak) break;
+                if (m.text.trim()) { target = m; break; }
+                if (/<wp:inline\b/.test(m.xml)) break;
+                y += heightOf(m);
+            }
+            if (!target) return;
+            const cur = spacingEff(styles, target).before;
+            const need = Math.ceil(bottom - y);
+            if (need <= cur) return;
+            target.xml = setSpacing(target.xml, { before: need });
+            changed++;
+        });
+    }
+    return changed;
+}
+
+/* ------------------------------------------------------------------ */
+/* Lembar pernyataan satu halaman                                       */
+/* ------------------------------------------------------------------ */
+
+const STEPS = [0.9, 0.8, 0.7, 0.6];
+
+export type StatementFitReport = { pages: number; tightened: number; stillOverflow: number };
+
+/**
+ * Lembar pernyataan harus satu halaman. Bila meluber, spasi baris & jarak antarparagraf di
+ * halaman itu diturunkan bertahap (90% … 60%) sampai muat. Ukuran huruf dan teks tidak diubah.
+ */
+export function fitStatementPage(model: DocModel, info: PageInfo, stylesXml: string, extra = 0): StatementFitReport {
+    const styles = new Styles(stylesXml);
+    const out: StatementFitReport = { pages: 0, tightened: 0, stillOverflow: 0 };
+    const all = flatten(model.body);
+    all.forEach((n, i) => {
+        const meta = info.get(n);
+        if (n.kind !== "paragraph" || meta?.role !== "front_heading" || !STATEMENT_RE.test(n.text.trim())) return;
+        let s = i;
+        while (s > 0) {
+            const m = all[s - 1];
+            if (m.kind !== "paragraph" || m.text.trim() || m.hasSectPr || m.hasPageBreak) break;
+            s--;
+        }
+        let e = i + 1;
+        let sect: string | null = null;
+        for (; e < all.length; e++) {
+            const m = all[e];
+            const r = info.get(m)?.role;
+            if (r && startsNewPage(r)) break;
+            if (m.kind === "paragraph" && m.hasSectPr) { sect = /<w:sectPr[\s\S]*?<\/w:sectPr>/.exec(m.xml)?.[0] ?? null; e++; break; }
+            if (m.kind === "paragraph" && m.hasPageBreak) { e++; break; }
+        }
+        if (!sect) {
+            for (let k = e; k < all.length; k++) {
+                const m = all[k];
+                if (m.kind === "paragraph" && m.hasSectPr) { sect = /<w:sectPr[\s\S]*?<\/w:sectPr>/.exec(m.xml)?.[0] ?? null; break; }
+            }
+        }
+        const g = geometry(sect ?? "", model.bodySectPr);
+        if (!g) return;
+        const page: CoverPage = { nodes: all.slice(s, e), sect };
+        out.pages++;
+        // extra: ruang kotak pernyataan (garis & jarak dalam) yang ditambahkan sesudahnya.
+        const fits = () => measure(page, g, styles, () => 1) + SAFETY + extra <= g.height;
+        if (fits()) return;
+
+        const paras = page.nodes.filter((x): x is ParaNode => x.kind === "paragraph");
+        const original = paras.map((p) => p.xml);
+        const base = paras.map((p) => spacingEff(styles, p));
+        let ok = false;
+        for (const k of STEPS) {
+            paras.forEach((p, idx) => {
+                const { sp, sz, before, after } = base[idx];
+                const rule = sp.rule ?? "auto";
+                const line = sp.line ?? 240;
+                const minExact = Math.round(sz * 10);
+                const nextLine = rule === "exact" ? Math.max(minExact, Math.round(line * k))
+                    : rule === "atLeast" ? Math.round(line * k)
+                    : Math.max(240, Math.round(line * k));
+                p.xml = setSpacing(original[idx], {
+                    before: Math.round(before * k), after: Math.round(after * k), line: nextLine, lineRule: rule,
+                });
+            });
+            if (fits()) { ok = true; break; }
+        }
+        out.tightened++;
+        if (!ok) out.stillOverflow++;
+    });
     return out;
 }

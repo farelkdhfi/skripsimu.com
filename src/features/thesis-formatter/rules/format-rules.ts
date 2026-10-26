@@ -173,6 +173,10 @@ export function createThesisRules(c: FormatConfig): FormatRules {
     /** Paragraf bertab: jangan sentuh perataan maupun indentasi sama sekali. */
     const tabbed = (): ParaFormat => ({ keepIndent: true });
 
+    /** Paragraf panjang di halaman isian (pernyataan, persetujuan): indentasi baris pertama sesuai preset. */
+    const formProse = (hint: LayoutHint): ParaFormat =>
+        hint.frontKind === "form" && !c.formParagraphIndent ? { ...prose(bodyLine), firstLine: 0 } : prose(bodyLine);
+
     return {
         id: c.presetId || "default-id",
         name: "Skripsi (Indonesia)",
@@ -287,7 +291,7 @@ export function createThesisRules(c: FormatConfig): FormatRules {
                     if (hint.tabCount > 0) {
                         // Tab hanya di awal = indentasi ketikan pada paragraf isi.
                         if (hint.leadingTabsOnly && hint.length >= PROSE_MIN_LENGTH) {
-                            return { ...(hint.frontKind === "abstract" ? abstract() : prose(bodyLine)), stripLeadingTabs: true };
+                            return { ...(hint.frontKind === "abstract" ? abstract() : formProse(hint)), stripLeadingTabs: true };
                         }
                         return tabbed();
                     }
@@ -297,7 +301,7 @@ export function createThesisRules(c: FormatConfig): FormatRules {
                     // butir isian kuesioner) dipertahankan perataan & jaraknya, tanpa indentasi.
                     if (zone === "front" || zone === "cover" || zone === "back") {
                         if (hint.length < PROSE_MIN_LENGTH) return layoutLine();
-                        return hint.frontKind === "abstract" ? abstract() : prose(bodyLine);
+                        return hint.frontKind === "abstract" ? abstract() : formProse(hint);
                     }
 
                     // Isi: baris pendek yang sengaja rata tengah/kanan dipertahankan

@@ -275,6 +275,41 @@ function originallySmall(xml: string, bodyHalf: number): boolean {
   return sizes.length > 0 && sizes.every((s) => s > 0 && s <= bodyHalf - 2);
 }
 
+/** Sumber data menutup blok catatan. */
+const SOURCE_RE = /^(sumber|source|data\s+diolah|diolah)\b/i;
+/** Penanda butir ketikan: "a.", "b)", "(c)", "2.". */
+const TYPED_MARK_RE = /^(\(?)([a-z]|\d{1,2})([.)])\s/i;
+const BLOCK_END_ROLES = new Set(["chapter", "chapter_label", "section", "subsection", "front_heading", "appendix_heading", "reference_heading", "list_heading"]);
+const numIdOf = (p: ParaNode) => {
+  const id = /<w:numId\s+w:val="(\d+)"/.exec(p.xml)?.[1];
+  return id && id !== "0" ? id : null;
+};
+
+/**
+ * Butir yang MENERUSKAN daftar dari atas tabel (nomor otomatis Word yang sama, atau penanda
+ * ketikan berikutnya: "c." setelah "b.") adalah isi bab, bukan catatan tabel.
+ */
+function continuesListAbove(n: ParaNode, nodes: (ParaNode | TableNode)[], outline: Outline, tableIdx: number): boolean {
+  const id = numIdOf(n);
+  const typed = TYPED_MARK_RE.exec(n.text.trim());
+  if (!id && !typed) return false;
+  const prevMark = typed
+    ? (/\d/.test(typed[2]) ? String(Number(typed[2]) - 1) : String.fromCharCode(typed[2].charCodeAt(0) - 1))
+    : null;
+  for (let k = tableIdx - 1, seen = 0; k >= 0 && seen < 60; k--, seen++) {
+    const role = outline.items[k]?.role;
+    if (role && BLOCK_END_ROLES.has(role)) break;
+    const m = nodes[k];
+    if (m.kind !== "paragraph") continue;
+    if (id && numIdOf(m) === id) return true;
+    if (typed && prevMark) {
+      const t = TYPED_MARK_RE.exec(m.text.trim());
+      if (t && t[1] === typed[1] && t[3] === typed[3] && t[2] === prevMark) return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Deteksi catatan di bawah tabel dari dokumen ASLI (sebelum konversi daftar
  * dan sebelum ukuran font ditimpa). Harus dipanggil paling awal.
@@ -304,6 +339,10 @@ export function detectTableNotes(
     }
 
     let headMode = false;
+    /** Setelah "Sumber: …" catatan selesai, kecuali menyusul judul catatan lain / baris bersimbol. */
+    let closed = false;
+    /** Semua baris catatan sejauh ini aslinya berhuruf lebih kecil dari teks isi. */
+    let allSmall = true;
     let count = 0;
     for (; k < nodes.length; k++) {
       const n = nodes[k];
@@ -325,15 +364,24 @@ export function detectTableNotes(
 
       // Kalimat isi yang panjang (atau beberapa kalimat) bukan catatan, walau hurufnya kecil.
       if (!head && !symbol && (txt.length > 300 || (txt.length > 160 && /[.!?]\s+\S/.test(txt)))) break;
+      // Sumber menutup catatan; lanjutan baris sumber yang sama kecilnya (tanpa penanda) masih boleh.
+      if (closed && !head && !symbol && !(allSmall && small && !marker)) break;
+      // Butir yang meneruskan daftar dari atas tabel = isi bab (mis. "b. Zat Kimia …" setelah "a. Larutan Pepsin").
+      if (!head && !symbol && continuesListAbove(n, nodes, outline, i)) break;
+      // Catatan ditulis kecil: baris berukuran normal sesudahnya bukan catatan.
+      if (count > 0 && allSmall && !small && !head && !symbol) break;
       const short = txt.length <= 200;
+      // Butir bernomor hanya catatan bila berada di bawah judul catatan ("Keterangan:").
       const ok = count === 0
         ? head || symbol || (small && txt.length <= 300)
-        : head || symbol || small || (short && (marker || NOTE_CONT_RE.test(txt) || headMode));
+        : head || symbol || small || (short && (NOTE_CONT_RE.test(txt) || headMode));
       if (!ok) break;
 
       const kind: NoteKind = head && (/:$/.test(txt) || txt.length <= 40) ? "head" : marker || symbol ? "item" : "plain";
       notes.set(n.id, kind);
       if (kind === "head") headMode = true;
+      if (head) closed = SOURCE_RE.test(txt);
+      allSmall = allSmall && small;
       count++;
     }
   });

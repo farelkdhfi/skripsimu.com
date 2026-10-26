@@ -13,6 +13,23 @@ import { paragraphLine, type VerifyRegion } from "./verify";
 /** Label 1–30 karakter, titik dua, isi. Label tidak boleh memuat titik dua / angka jam. */
 const LV_RAW_RE = /^[ \t\u00a0]*([A-Za-z\u00C0-\u024F\u0370-\u03FF][^:\t\n]{0,29}?)[ \t\u00a0]*[:：][ \t\u00a0]*(?=\S)/;
 
+/**
+ * Tab & ganti baris manual di DALAM isi label (dipakai penulis untuk memaksa judul panjang turun
+ * baris: "… Postbiotik [tab]terhadap …") diganti spasi biasa — atau dibuang bila sudah berspasi —
+ * agar isi mengalir dan baris lanjutannya rata di bawah awal isi (indentasi gantung).
+ */
+function flattenValue(xml: string, from: number): string {
+    const head = xml.slice(0, from);
+    const tail = xml.slice(from);
+    const plain = (x: string) => x.replace(/<w:tab\s*\/>/g, "\t").replace(/<[^>]+>/g, "");
+    return head + tail.replace(/<w:tab\s*\/>|<w:br\b(?![^>]*w:type="(?:page|column)")[^>]*\/>|<w:cr\s*\/>/g, (m, off: number) => {
+        const before = plain(tail.slice(0, off));
+        const after = plain(tail.slice(off + m.length));
+        if (!before.trim() || !after.trim() || /\s$/.test(before) || /^\s/.test(after)) return "";
+        return `<w:t xml:space="preserve"> </w:t>`;
+    });
+}
+
 export function alignLabelLines(
     nodes: (ParaNode | TableNode)[],
     outline: Outline,
@@ -60,9 +77,8 @@ export function alignLabelLines(
                 let xml = removeLeading(p.xml, m[0].length);
                 const e = xml.indexOf("</w:pPr>");
                 const at = e !== -1 ? e + 8 : xml.indexOf(">") + 1;
-                xml = xml.slice(0, at) +
-                    `<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(labels[k])}</w:t><w:tab/><w:t xml:space="preserve">: </w:t></w:r>` +
-                    xml.slice(at);
+                const labelRun = `<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(labels[k])}</w:t><w:tab/><w:t xml:space="preserve">: </w:t></w:r>`;
+                xml = flattenValue(xml.slice(0, at) + labelRun + xml.slice(at), at + labelRun.length);
                 const hang = labelW + charTw * 2;
                 p.xml = withProps(xml, "w:pPr", {
                     "w:tabs": `<w:tabs><w:tab w:val="left" w:pos="${base + labelW}"/></w:tabs>`,

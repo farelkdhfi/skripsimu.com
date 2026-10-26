@@ -1,8 +1,8 @@
 "use client";
 import { useMemo, useState } from "react";
-import { Check, Download, X } from "lucide-react";
+import type { ReactNode } from "react";
+import { AlertTriangle, Check, Download, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { FormatResult, Role } from "../types";
 
 const ROLE_LABEL: Record<Role, string> = {
@@ -25,19 +25,41 @@ const ROLE_LABEL: Record<Role, string> = {
 };
 
 const ROLE_STYLE: Partial<Record<Role, string>> = {
-  chapter: "bg-slate-900 text-white",
-  chapter_label: "bg-slate-900 text-white",
-  front_heading: "bg-purple-200 text-purple-900",
-  list_heading: "bg-purple-200 text-purple-900",
-  reference_heading: "bg-purple-200 text-purple-900",
-  appendix_heading: "bg-purple-200 text-purple-900",
-  section: "bg-green-200 text-green-900",
-  subsection: "bg-green-100 text-green-900",
-  figure: "bg-amber-200 text-amber-900",
-  figure_caption: "bg-amber-100 text-amber-900",
-  table_caption: "bg-amber-100 text-amber-900",
-  cover: "bg-slate-200 text-slate-700",
+  chapter: "bg-neutral-900 text-white",
+  chapter_label: "bg-neutral-900 text-white",
+  front_heading: "bg-orange-300 text-neutral-900",
+  list_heading: "bg-orange-300 text-neutral-900",
+  reference_heading: "bg-orange-300 text-neutral-900",
+  appendix_heading: "bg-orange-300 text-neutral-900",
+  section: "bg-orange-200 text-neutral-900",
+  subsection: "bg-orange-100 text-neutral-800",
+  figure: "bg-neutral-200 text-neutral-800",
+  figure_caption: "bg-neutral-100 text-neutral-700",
+  table_caption: "bg-neutral-100 text-neutral-700",
+  cover: "bg-neutral-200 text-neutral-700",
 };
+
+/** Sedikit menjorok supaya hierarki bab → subbab terbaca */
+const ROLE_INDENT: Partial<Record<Role, string>> = {
+  section: "ml-4",
+  subsection: "ml-8",
+};
+
+const LEVEL = {
+  ok: { border: "border-green-400", text: "text-green-800", Icon: Check, icon: "text-green-600" },
+  warn: { border: "border-amber-400", text: "text-amber-800", Icon: AlertTriangle, icon: "text-amber-600" },
+  error: { border: "border-red-400", text: "text-red-700", Icon: X, icon: "text-red-600" },
+} as const;
+
+type Tab = "ringkasan" | "pemeriksaan" | "urutan";
+
+const TABS: { id: Tab; label: string }[] = [
+  { id: "ringkasan", label: "Ringkasan" },
+  { id: "pemeriksaan", label: "Pemeriksaan" },
+  { id: "urutan", label: "Urutan dokumen" },
+];
+
+const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(" ");
 
 function download(result: FormatResult) {
   const bin = atob(result.docxBase64);
@@ -53,13 +75,19 @@ function download(result: FormatResult) {
   URL.revokeObjectURL(url);
 }
 
-const LEVEL_STYLE = {
-  ok: "bg-green-50 text-green-900",
-  warn: "bg-amber-50 text-amber-900",
-  error: "bg-red-50 text-red-800",
-} as const;
+function SectionTitle({ title, desc }: { title: string; desc?: string }) {
+  return (
+    <div>
+      <h3 className="text-base font-medium text-neutral-900">{title}</h3>
+      {desc && <p className="mt-0.5 text-xs leading-relaxed text-neutral-500">{desc}</p>}
+    </div>
+  );
+}
 
-export function ResultView({ result }: { result: FormatResult }) {
+export function ResultView({
+  result, onEdit, onRestart,
+}: { result: FormatResult; onEdit?: () => void; onRestart?: () => void }) {
+  const [tab, setTab] = useState<Tab>("ringkasan");
   const [showAll, setShowAll] = useState(false);
   const preview = useMemo(
     () => (showAll ? result.preview : result.preview.filter((p) => p.role !== "empty").slice(0, 40)),
@@ -67,131 +95,224 @@ export function ResultView({ result }: { result: FormatResult }) {
   );
 
   const failed = result.integrity.filter((i) => !i.ok).length;
+  const notes = result.validation.filter((v) => v.level !== "ok").length;
+  const issues = failed + notes;
+
+  const stats = [
+    ["Bab", result.stats.chapters],
+    ["Subbab", result.stats.sections],
+    ["Anak subbab", result.stats.subsections],
+    ["Bagian awal", result.stats.frontMatter],
+    ["Tabel", result.stats.tables],
+    ["Gambar", result.stats.figures],
+    ["Pustaka", result.stats.references],
+    ["Lampiran", result.stats.appendices],
+  ] as const;
+
+  const textBtn =
+    "rounded-full px-3 py-1.5 text-sm text-neutral-500 transition hover:text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-400";
 
   return (
-    <div className="space-y-6">
-      <Card className="rounded-[2rem] border-0 bg-slate-900 shadow-none">
-        <CardContent className="flex flex-col gap-4 py-6 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-sm text-slate-300">
-              {result.mode === "preserve"
-                ? "Dokumen asli disunting di tempat — struktur, tabel, dan gambar dipertahankan"
-                : "Dokumen disusun ulang dari teks PDF"}
+    <div className="mx-auto max-w-5xl space-y-12 px-4 py-14 sm:px-8 sm:py-20">
+      {/* Header + unduh */}
+      <header className="flex flex-col gap-8 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0 space-y-3">
+          <p className="text-sm text-neutral-500">Hasil format</p>
+          <h1 className="break-words text-3xl font-normal leading-[1.1] tracking-tight text-neutral-900 sm:text-4xl">
+            {result.fileName}
+          </h1>
+          <p className="max-w-xl text-sm leading-relaxed text-neutral-600">
+            {result.mode === "preserve"
+              ? "Dokumen asli disunting langsung — struktur, tabel, dan gambar tetap utuh."
+              : "Dokumen disusun ulang dari teks PDF."}
+          </p>
+
+          {issues === 0 ? (
+            <p className="flex items-center gap-2 text-sm text-green-700">
+              <Check className="size-4" /> Semua pemeriksaan lolos
             </p>
-            <p className="mt-1 text-lg font-medium tracking-tight text-white">{result.fileName}</p>
-          </div>
-          <Button onClick={() => download(result)} className="h-12 rounded-full bg-white px-6 text-sm text-slate-900 hover:bg-slate-100">
-            <Download className="mr-2 size-4" /> Unduh DOCX
-          </Button>
-        </CardContent>
-      </Card>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setTab("pemeriksaan")}
+              className="flex items-center gap-2 text-sm text-amber-700 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-400"
+            >
+              <AlertTriangle className="size-4" /> {issues} hal perlu dicek — lihat detail
+            </button>
+          )}
+        </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card className="rounded-[2rem] border-0 bg-purple-100 shadow-none">
-          <CardHeader>
-            <CardTitle className="text-lg font-medium tracking-tight text-slate-900">
-              Keutuhan dokumen {failed === 0 ? "— terverifikasi" : `— ${failed} perlu diperiksa`}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {result.integrity.map((i) => (
-              <div key={i.label} className="flex items-center justify-between gap-3 rounded-2xl bg-white px-4 py-3 text-sm">
-                <span className="flex items-center gap-2 text-slate-700">
-                  {i.ok
-                    ? <Check className="size-4 shrink-0 text-green-600" />
-                    : <X className="size-4 shrink-0 text-red-600" />}
-                  {i.label}
-                </span>
-                <span className="shrink-0 tabular-nums text-slate-500">
-                  {i.before} <span className="mx-1 text-slate-300">→</span> {i.after}
-                </span>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-[2rem] border-0 bg-green-100 shadow-none">
-          <CardHeader>
-            <CardTitle className="text-lg font-medium tracking-tight text-slate-900">Struktur terdeteksi</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <dl className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {([
-                ["Bab", result.stats.chapters],
-                ["Subbab", result.stats.sections],
-                ["Anak subbab", result.stats.subsections],
-                ["Bagian awal", result.stats.frontMatter],
-                ["Tabel", result.stats.tables],
-                ["Gambar", result.stats.figures],
-                ["Pustaka", result.stats.references],
-                ["Lampiran", result.stats.appendices],
-              ] as const).map(([label, value]) => (
-                <div key={label} className="rounded-2xl bg-white px-4 py-3">
-                  <dt className="text-xs text-slate-500">{label}</dt>
-                  <dd className="mt-0.5 text-xl font-medium tabular-nums text-slate-900">{value}</dd>
-                </div>
-              ))}
-            </dl>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card className="rounded-[2rem] border-0 bg-slate-50 shadow-none">
-        <CardHeader><CardTitle className="text-lg font-medium tracking-tight text-slate-900">Catatan pemeriksaan</CardTitle></CardHeader>
-        <CardContent className="space-y-2">
-          {result.validation.map((v, i) => (
-            <p key={i} className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${LEVEL_STYLE[v.level]}`}>{v.message}</p>
-          ))}
-        </CardContent>
-      </Card>
-
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card className="rounded-[2rem] border-0 bg-slate-50 shadow-none">
-          <CardHeader><CardTitle className="text-lg font-medium tracking-tight text-slate-900">Yang diterapkan</CardTitle></CardHeader>
-          <CardContent>
-            <ul className="space-y-2 text-sm text-slate-700">
-              {result.changes.map((c, i) => (
-                <li key={i} className="flex gap-2.5">
-                  <Check className="mt-0.5 size-4 shrink-0 text-green-600" />
-                  <span className="leading-relaxed">{c}</span>
-                </li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-[2rem] border-0 bg-slate-50 shadow-none">
-          <CardHeader><CardTitle className="text-lg font-medium tracking-tight text-slate-900">Saran</CardTitle></CardHeader>
-          <CardContent>
-            <ul className="space-y-2 text-sm leading-relaxed text-slate-700">
-              {result.recommendations.map((r, i) => <li key={i} className="rounded-2xl bg-white px-4 py-3">{r}</li>)}
-            </ul>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card className="rounded-[2rem] border-0 bg-slate-50 shadow-none">
-        <CardHeader className="flex-row items-center justify-between space-y-0">
-          <CardTitle className="text-lg font-medium tracking-tight text-slate-900">Urutan dokumen</CardTitle>
-          <button
-            type="button"
-            onClick={() => setShowAll((v) => !v)}
-            className="rounded-full bg-white px-4 py-2 text-xs text-slate-600 transition hover:bg-slate-100"
+        <div className="flex shrink-0 flex-col gap-3 sm:items-end">
+          <Button
+            onClick={() => download(result)}
+            className="h-12 w-full rounded-full bg-neutral-900 pl-2 pr-6 text-sm text-white hover:bg-neutral-800 sm:w-auto"
           >
-            {showAll ? "Ringkas" : "Tampilkan semua"}
-          </button>
-        </CardHeader>
-        <CardContent className="space-y-1.5">
-          {preview.map((p, i) => (
-            <div key={i} className="flex items-start gap-3 rounded-2xl bg-white px-4 py-2.5">
-              <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-[11px] ${ROLE_STYLE[p.role] ?? "bg-slate-100 text-slate-600"}`}>
-                {ROLE_LABEL[p.role]}
-              </span>
-              <span className="min-w-0 flex-1 truncate text-sm text-slate-700">{p.text || "—"}</span>
-            </div>
+            <span className="mr-2 grid size-8 place-items-center rounded-full bg-orange-400 text-neutral-950">
+              <Download className="size-4" />
+            </span>
+            Unduh DOCX
+          </Button>
+          <div className="flex flex-wrap gap-1 sm:justify-end">
+            {onEdit && <button type="button" onClick={onEdit} className={textBtn}>Ubah aturan</button>}
+            {onRestart && <button type="button" onClick={onRestart} className={textBtn}>Mulai dari awal</button>}
+          </div>
+        </div>
+      </header>
+
+      {/* Tab */}
+      <div>
+        <div role="tablist" aria-label="Detail hasil" className="flex flex-wrap gap-x-7 border-b border-neutral-200">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={tab === t.id}
+              onClick={() => setTab(t.id)}
+              className={cx(
+                "-mb-px flex items-center gap-2 border-b-2 pb-3 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-400",
+                tab === t.id
+                  ? "border-neutral-900 text-neutral-900"
+                  : "border-transparent text-neutral-500 hover:text-neutral-900",
+              )}
+            >
+              {t.label}
+              {t.id === "pemeriksaan" && issues > 0 && (
+                <span className="rounded-full bg-orange-400 px-1.5 text-[11px] text-neutral-950">{issues}</span>
+              )}
+            </button>
           ))}
-        </CardContent>
-      </Card>
+        </div>
+
+        <div className="pt-10">
+          {/* Tab 1: Ringkasan */}
+          {tab === "ringkasan" && (
+            <div className="space-y-12">
+              <section className="space-y-5">
+                <SectionTitle title="Struktur yang terdeteksi" desc="Jumlah bagian yang dikenali dari dokumenmu." />
+                <dl className="grid grid-cols-2 gap-x-6 gap-y-8 sm:grid-cols-4">
+                  {stats.map(([label, value]) => (
+                    <div key={label} className="border-t border-neutral-200 pt-4">
+                      <dd className="text-3xl font-normal tabular-nums text-neutral-900">{value}</dd>
+                      <dt className="mt-1 text-xs text-neutral-500">{label}</dt>
+                    </div>
+                  ))}
+                </dl>
+              </section>
+
+              <div className="grid gap-12 lg:grid-cols-2">
+                <section className="space-y-4">
+                  <SectionTitle title="Yang sudah diterapkan" />
+                  {result.changes.length === 0 ? (
+                    <p className="text-sm text-neutral-500">Tidak ada perubahan yang tercatat.</p>
+                  ) : (
+                    <ul className="space-y-3 text-sm text-neutral-700">
+                      {result.changes.map((c, i) => (
+                        <li key={i} className="flex gap-3">
+                          <Check className="mt-0.5 size-4 shrink-0 text-orange-500" />
+                          <span className="leading-relaxed">{c}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+
+                <section className="space-y-4">
+                  <SectionTitle title="Saran" desc="Hal yang sebaiknya kamu cek sendiri di Word." />
+                  {result.recommendations.length === 0 ? (
+                    <p className="text-sm text-neutral-500">Tidak ada saran tambahan.</p>
+                  ) : (
+                    <ul className="space-y-3 text-sm leading-relaxed text-neutral-700">
+                      {result.recommendations.map((r, i) => (
+                        <li key={i} className="border-l-2 border-orange-300 pl-4">{r}</li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+              </div>
+            </div>
+          )}
+
+          {/* Tab 2: Pemeriksaan */}
+          {tab === "pemeriksaan" && (
+            <div className="space-y-12">
+              <section className="space-y-4">
+                <SectionTitle
+                  title={failed === 0 ? "Keutuhan dokumen — terverifikasi" : `Keutuhan dokumen — ${failed} perlu diperiksa`}
+                  desc="Perbandingan sebelum → sesudah diformat."
+                />
+                <div className="border-t border-neutral-200">
+                  {result.integrity.map((i) => (
+                    <div key={i.label} className="flex items-center justify-between gap-3 border-b border-neutral-100 py-3 text-sm">
+                      <span className="flex items-center gap-3 text-neutral-800">
+                        {i.ok
+                          ? <Check className="size-4 shrink-0 text-green-600" />
+                          : <X className="size-4 shrink-0 text-red-600" />}
+                        {i.label}
+                      </span>
+                      <span className="shrink-0 tabular-nums text-neutral-500">
+                        {i.before} <span className="mx-1 text-neutral-300">→</span> {i.after}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section className="space-y-4">
+                <SectionTitle title="Catatan pemeriksaan" />
+                <div className="space-y-3">
+                  {result.validation.map((v, i) => {
+                    const { border, text, Icon, icon } = LEVEL[v.level];
+                    return (
+                      <p key={i} className={cx("flex gap-3 border-l-2 pl-4 text-sm leading-relaxed", border, text)}>
+                        <Icon className={cx("mt-0.5 size-4 shrink-0", icon)} />
+                        <span>{v.message}</span>
+                      </p>
+                    );
+                  })}
+                </div>
+              </section>
+            </div>
+          )}
+
+          {/* Tab 3: Urutan dokumen */}
+          {tab === "urutan" && (
+            <section className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <SectionTitle
+                  title="Urutan dokumen"
+                  desc={`Menampilkan ${preview.length} dari ${result.preview.length} bagian.`}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowAll((v) => !v)}
+                  className="rounded-full bg-neutral-100 px-4 py-2 text-xs text-neutral-700 transition hover:bg-neutral-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-400"
+                >
+                  {showAll ? "Ringkas" : "Tampilkan semua"}
+                </button>
+              </div>
+              <div className="max-h-[32rem] overflow-y-auto border-t border-neutral-200">
+                {preview.map((p, i) => (
+                  <div
+                    key={i}
+                    className={cx("flex items-center gap-3 border-b border-neutral-100 py-2.5", ROLE_INDENT[p.role])}
+                  >
+                    <span
+                      className={cx(
+                        "w-32 shrink-0 truncate rounded-full px-2.5 py-0.5 text-center text-[11px]",
+                        ROLE_STYLE[p.role] ?? "bg-neutral-100 text-neutral-600",
+                      )}
+                    >
+                      {ROLE_LABEL[p.role]}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-sm text-neutral-700">{p.text || "—"}</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

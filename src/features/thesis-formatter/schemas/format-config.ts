@@ -94,6 +94,19 @@ export const formatConfigSchema = z.object({
   abstractIndent: z.boolean(),
   /** Jarak antara teks abstrak dan baris "Kata Kunci"/"Keywords", dalam baris (null = bawaan formatter). */
   keywordGapLines: z.number().min(0).max(5).nullable(),
+  /**
+   * Bingkai lembar pernyataan:
+   * - keep : ikuti dokumen asli
+   * - box  : bingkai halaman seragam (kotak/tabel bingkai buatan penulis diganti)
+   * - none : tanpa bingkai
+   */
+  statementFrame: z.enum(["keep", "box", "none"]),
+  /** Kolom blok tanda tangan: ikuti posisi di naskah ("author") atau menurut peran ("roles": pembimbing kanan, pengesah kiri). */
+  signatureColumns: z.enum(["author", "roles"]),
+  /** Perataan teks di dalam kolom tanda tangan. */
+  signatureTextAlign: z.enum(["center", "left"]),
+  /** Paragraf panjang di halaman isian (pernyataan, persetujuan) memakai indentasi baris pertama. */
+  formParagraphIndent: z.boolean(),
 
   /** Pertahankan penomoran halaman yang sudah ada di dokumen. */
   pageNumbers: z.enum(["none", "bottom-center", "bottom-right", "keep"]),
@@ -155,6 +168,10 @@ export const defaultFormatConfig: FormatConfig = {
   listLayout: "nested",
   abstractIndent: true,
   keywordGapLines: null,
+  statementFrame: "keep",
+  signatureColumns: "author",
+  signatureTextAlign: "center",
+  formParagraphIndent: true,
   pageNumbers: "bottom-center",
   romanFrontMatter: true,
   frontNumberingFrom: "first",

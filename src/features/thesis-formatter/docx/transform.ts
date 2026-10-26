@@ -57,7 +57,9 @@ import { collapseStackedHeadings } from "./heading-stack";
 import { neutralizeAutoSpacing } from "./autospacing";
 import { applyTableLines, captureTableLook } from "./table-lines";
 import { blackenLinks } from "./link-color";
-import { fitCoverPages } from "./cover-fit";
+import { clearFloatingSignatures, fitCoverPages, fitStatementPage } from "./cover-fit";
+import { inlineFloatingImages } from "./float-inline";
+import { boxStatementPages, findFrameTables, removeFrameShapes, STATEMENT_BOX_EXTRA, statementRanges, unwrapStatementFrames } from "./statement";
 
 export type TransformResult = {
     buffer: Buffer;
@@ -249,6 +251,12 @@ export async function transformDocx(
     const chapters = unifyChapterHeadings(model);
     // Gambar + keterangannya dalam satu paragraf → dua paragraf (keterangannya jadi dikenali).
     const figSplit = splitFigureCaptions(model);
+    // Lembar pernyataan di dalam tabel bingkai dikeluarkan dari tabelnya (teks tetap), kecuali preset "keep".
+    const unwrapped = config.statementFrame === "keep" ? null : unwrapStatementFrames(model);
+    // Gambar isi yang melayang → inline di paragrafnya sendiri (tanda tangan, materai, logo, bentuk tetap melayang).
+    const floats = inlineFloatingImages(model);
+    // Tabel 1×1 pembungkus beberapa paragraf = bingkai, bukan tabel data.
+    const frameTables = findFrameTables(model);
     const nodes = flatten(model.body);
     const stylesXml = await zip.file("word/styles.xml")?.async("string");
     // Ketebalan asli dicatat sebelum modul lain mengubah format (judul daftar & tingkat 4 mengikutinya).
@@ -284,6 +292,8 @@ export async function transformDocx(
     if (chapters.merged || chapters.split) notes.push(`${chapters.merged + chapters.split} judul bab diseragamkan menjadi satu judul dua baris (nomor bab di atas, judul bab di bawah).`);
     if (headNums.count) notes.push(`${headNums.count} nomor subbab otomatis Word (mis. "1.1") diubah menjadi nomor ketikan agar tidak terbaca sebagai daftar bernomor.`);
     if (figSplit) notes.push(`${figSplit} gambar yang keterangannya menyatu dalam satu paragraf dipisah: gambar di atas, keterangan di bawahnya (masuk daftar gambar/ilustrasi).`);
+    if (floats.inlined) notes.push(`${floats.inlined} gambar melayang (bebas digeser) dijadikan "In Line with Text"${floats.moved ? `; ${floats.moved} di antaranya dikeluarkan dari paragraf teks ke paragrafnya sendiri, di atas keterangannya` : ""}. Tanda tangan, materai, logo sampul, dan bentuk/kotak tetap melayang.`);
+    if (unwrapped?.count) notes.push("Lembar pernyataan yang ditulis di dalam tabel bingkai dikeluarkan dari tabelnya (teks tidak berubah) agar diformat seperti halaman lain.");
 
     const page = rules.page("main");
     const usableWidth = page.widthTwips - page.margin.left - page.margin.right;
@@ -302,6 +312,17 @@ export async function transformDocx(
         ? prefaceStart(nodes, outline) : -1;
     if (prefaceAt > 0) ensureSectionBreakBefore(nodes, prefaceAt, model.bodySectPr);
     const prefaceNode = prefaceAt > 0 ? (nodes[prefaceAt] as ParaNode) : null;
+
+    // Lembar pernyataan: kotak bingkai buatan penulis dibuang; preset "box" memberi bingkai halaman
+    // seragam, jadi halamannya perlu section sendiri.
+    const statements = config.statementFrame === "keep" ? [] : statementRanges(nodes, outline);
+    if (statements.length) {
+        const fp = rules.page("front");
+        const area = { width: fp.widthTwips - fp.margin.left - fp.margin.right, height: fp.heightTwips - fp.margin.top - fp.margin.bottom };
+        const shapes = statements.reduce((a, r) => a + removeFrameShapes(nodes, r, area), 0);
+        if (shapes) notes.push(`${shapes} kotak bingkai buatan di lembar pernyataan diganti ${config.statementFrame === "box" ? "kotak seragam setinggi isi" : "tanpa bingkai"}.`);
+
+    }
 
     /* -------- daftar (ketikan & Word asli) -------- */
 
@@ -323,7 +344,7 @@ export async function transformDocx(
     const report = applyFormat(model, outline, rules, {
         cleanupBlankPages: config.cleanupBlankPages,
         normalizeTables: config.normalizeTables,
-        skipTables: sigTables,
+        skipTables: new Set([...sigTables, ...frameTables]),
         styleLook,
     });
 
@@ -386,7 +407,7 @@ export async function transformDocx(
         const tl = applyTableLines(nodes, outline, tableLook, {
             lines: config.tableBorders === "minimal",
             numericAlign: config.tableNumericAlign,
-            skip: sigTables,
+            skip: new Set([...sigTables, ...frameTables]),
         });
         if (tl.tables) notes.push(`${tl.tables} tabel dirapikan: ${config.tableBorders === "minimal" ? "garis horizontal di atas, di bawah header (judul kolom induk & baris satuan), di atas baris Jumlah/Total, dan di bawah tabel; " : ""}perataan & tebal judul kolom mengikuti naskah asli.`);
     }
@@ -471,6 +492,8 @@ export async function transformDocx(
         font: config.fontFamily,
         halfPts,
         tables: sigTables,
+        columns: config.signatureColumns,
+        textAlign: config.signatureTextAlign,
     });
     if (signatures.blocks) notes.push(`${signatures.blocks} blok tanda tangan disusun menjadi tabel tanpa garis dengan ruang tanda tangan yang seragam.`);
     if (signatures.cleaned) notes.push(`${signatures.cleaned} tabel tanda tangan dirapikan: garis tabel dibuang, isi rata tengah, dan blok tidak terpotong ke halaman lain.`);
@@ -597,6 +620,7 @@ export async function transformDocx(
             model.bodySectPr = finish(patchSectPr(model.bodySectPr, plan));
         }
     });
+
     /* -------- gambar yang melebihi area teks -------- */
 
     const images: ImageReport = { scaled: 0, floatingOverflow: 0 };
@@ -727,9 +751,9 @@ export async function transformDocx(
         ],
         added: {
             ...signatures.added,
-            tables: signatures.added.tables - tpl.removed.tables,
-            rows: signatures.added.rows - tpl.removed.rows,
-            cells: signatures.added.cells - tpl.removed.cells,
+            tables: signatures.added.tables - tpl.removed.tables - (unwrapped?.tables ?? 0),
+            rows: signatures.added.rows - tpl.removed.rows - (unwrapped?.rows ?? 0),
+            cells: signatures.added.cells - tpl.removed.cells - (unwrapped?.cells ?? 0),
         },
     };
     const issues = verify(before, after, verifyOpts);
@@ -746,13 +770,23 @@ export async function transformDocx(
 
     await patchHeadingStyles(zip);
 
-    // Sampul harus muat satu halaman: diukur dengan style FINAL; logo diperkecil bila meluber.
-    const coverFit = fitCoverPages(model, pageInfo, (await zip.file("word/styles.xml")?.async("string")) ?? "");
-    if (coverFit.scaled) {
-        zip.file("word/document.xml", serializeDocument(model));
-        notes.push(`Logo di ${coverFit.scaled} halaman sampul diperkecil (${coverFit.percent.join("%, ")}% dari ukuran asli) agar seluruh isi sampul muat dalam satu halaman.`);
-    }
+    // Ukuran halaman diukur dengan style FINAL.
+    const finalStyles = (await zip.file("word/styles.xml")?.async("string")) ?? "";
+    // Sampul harus muat satu halaman: logo diperkecil bila meluber.
+    const coverFit = fitCoverPages(model, pageInfo, finalStyles);
+    if (coverFit.scaled) notes.push(`Logo di ${coverFit.scaled} halaman sampul diperkecil (${coverFit.percent.join("%, ")}% dari ukuran asli) agar seluruh isi sampul muat dalam satu halaman.`);
     if (coverFit.stillOverflow) notes.push(`${coverFit.stillOverflow} halaman sampul diperkirakan masih melebihi satu halaman walau logo sudah diperkecil maksimal. Kurangi baris kosong atau persingkat isi sampul.`);
+    // Nama di bawah tanda tangan/materai melayang tidak boleh tertimpa gambarnya.
+    const sigGap = clearFloatingSignatures(model, pageInfo, finalStyles);
+    if (sigGap) notes.push(`${sigGap} baris nama di bawah tanda tangan/materai diberi jarak agar tidak tertimpa gambarnya.`);
+    // Lembar pernyataan satu halaman.
+    const boxMode = config.statementFrame === "box";
+    const stFit = fitStatementPage(model, pageInfo, finalStyles, boxMode ? STATEMENT_BOX_EXTRA : 0);
+    if (stFit.tightened) notes.push(`Spasi lembar pernyataan dirapatkan agar muat satu halaman${stFit.stillOverflow ? " (masih melebihi satu halaman: persingkat isinya)" : ""}.`);
+    // Paling akhir: isi lembar pernyataan yang sudah rapi dibungkus kotak setinggi isinya.
+    const boxed = boxMode ? boxStatementPages(model, pageInfo, { width: usableWidth }) : 0;
+    if (boxed) notes.push("Isi lembar pernyataan dibingkai kotak setinggi isinya (garis bawah tepat di bawah nama penulis).");
+    if (coverFit.scaled || sigGap || stFit.tightened || boxed) zip.file("word/document.xml", serializeDocument(model));
 
     const buffer = await zip.generateAsync({
         type: "nodebuffer",

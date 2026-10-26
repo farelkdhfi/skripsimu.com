@@ -139,7 +139,17 @@ export type Signals = {
   chapterHint?: boolean;
   /** Paragraf hanya memuat gambar MELAYANG (tanda tangan, stempel, foto biodata). */
   floatingOnly?: boolean;
+  /** Paragraf ini menutup halaman (section break / pindah halaman manual). */
+  pageEnd?: boolean;
+  /** Paragraf ini membuka halaman baru (page break before). */
+  pageStart?: boolean;
 };
+
+/**
+ * Penanda halaman pengesahan/persetujuan. Halaman seperti ini sering TANPA judul (hanya judul
+ * skripsi, "OLEH :", lalu blok tanda tangan), sehingga tidak boleh ikut dianggap sampul.
+ */
+const APPROVAL_RE = /^(?:menyetujui|mengesahkan|disetujui|disahkan|mengetahui|pembimbing\b|ketua\s+(?:panitia|program|jurusan|departemen|prodi|sidang|komisi)|dekan\b|wakil\s+dekan)/i;
 
 /**
  * Petunjuk tata letak asli sebuah paragraf. Ini bukan isi dokumen, melainkan
@@ -219,6 +229,11 @@ export function scanStructure(signals: Signals[]): { zones: Zone[]; inList: bool
   const inList: boolean[] = new Array(signals.length).fill(false);
   let zone: Zone = "cover";
   let listing = false;
+  /** Awal halaman yang sedang dibaca & jumlah batas halaman yang sudah dilewati. */
+  let pageFrom = 0;
+  let pages = 0;
+  /** Setelah baris tahun ("2026") — penutup halaman sampul — bila halaman tidak dipisah break. */
+  let afterYear = 0;
 
   const bareOf = (s: Signals) => s.text.trim().replace(/[:\s]+$/, "");
   const entryAt = (k: number) => {
@@ -238,6 +253,7 @@ export function scanStructure(signals: Signals[]): { zones: Zone[]; inList: bool
 
   for (let i = 0; i < signals.length; i++) {
     const s = signals[i];
+    if (s.pageStart && i > 0 && i !== pageFrom) { pageFrom = i; pages++; }
     if (s.isTable) { zones[i] = zone; inList[i] = listing; continue; }
 
     const t = bareOf(s);
@@ -266,10 +282,22 @@ export function scanStructure(signals: Signals[]): { zones: Zone[]; inList: bool
       else if (zone === "cover" && (FRONT_HEADING_RE.test(t) || LIST_HEADING_RE.test(t)) && headingish(t)) zone = "front";
     }
 
+    // Halaman setelah sampul tanpa judul (mis. pengesahan: judul skripsi, "OLEH :", tanda tangan)
+    // dikenali dari isinya: begitu muncul penanda pengesahan, seluruh halaman itu bagian awal.
+    // Halaman sampul pertama tidak pernah terkena aturan ini.
+    // Banyak penulis berpindah halaman cukup dengan baris kosong (tanpa break): awal halamannya
+    // lalu diambil dari baris tahun penutup sampul ("Jatinangor ↵ 2026") yang terakhir.
+    if (zone === "cover" && !listing && (pages > 0 || afterYear > 0) && raw.length <= 80 && APPROVAL_RE.test(raw)) {
+      for (let k = Math.max(pageFrom, afterYear); k < i; k++) zones[k] = "front";
+      zone = "front";
+    }
+    if (zone === "cover" && /^(?:19|20)\d{2}$/.test(raw)) afterYear = i + 1;
+
     zones[i] = zone;
     inList[i] = listing;
 
     if (!listing && t.length <= 60 && LIST_HEADING_RE.test(t) && headingish(t)) listing = true;
+    if (s.pageEnd) { pageFrom = i + 1; pages++; }
   }
   return { zones, inList };
 }

@@ -27,7 +27,7 @@ function trimBreaks(els: XmlEl[]): XmlEl[] {
     return els.slice(a, b);
 }
 
-function maxId(list: BlockNode[]): number {
+export function maxId(list: BlockNode[]): number {
     let m = 0;
     const walk = (xs: BlockNode[]) => {
         for (const n of xs) {
@@ -43,7 +43,7 @@ function maxId(list: BlockNode[]): number {
 }
 
 /** Gambar melayang → inline (ukuran & grafik sama). Bentuk mc:AlternateContent dibiarkan. */
-function inlineOf(run: string): string {
+export function inlineOf(run: string): string {
     if (/<mc:AlternateContent\b/.test(run)) return run;
     return run.replace(/<wp:anchor\b[\s\S]*?<\/wp:anchor>/g, (anchor) => {
         const pick = (re: RegExp) => re.exec(anchor)?.[0] ?? "";

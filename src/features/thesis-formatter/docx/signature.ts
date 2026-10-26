@@ -33,11 +33,17 @@ type K = "date" | "role" | "materai" | "sigline" | "id" | "name" | "plain";
 type Cls = "multi" | "left" | "center" | "right";
 type Line = { p: ParaNode; parts: string[]; kinds: K[]; cls: Cls; gapBefore: boolean };
 type Item = { xml: string; kind: K };
-type SigFmt = { font: string; halfPts: number };
+type SigFmt = { font: string; halfPts: number; align: "center" | "left" };
 
 const DATE_RE = /^[A-Z][A-Za-z.'\- ]{1,40},\s*(\d{1,2}\s+)?[A-Za-z]{3,12}\s+\d{4}\.?$/;
-const ROLE_RE = /^(mengetahui|menyetujui|disetujui|disahkan|pembimbing|penguji|ketua|dekan|wakil|rektor|direktur|kepala|sekretaris|koordinator|kaprodi|yang\s+menyatakan|yang\s+membuat|penulis|peneliti|mahasiswa|dosen|pembina|atas\s+nama|a\.n\.|an\.)/i;
+const ROLE_RE = /^(mengetahui|menyetujui|mengesahkan|disetujui|disahkan|pembimbing|penguji|ketua|dekan|wakil|rektor|direktur|kepala|sekretaris|koordinator|kaprodi|yang\s+menyatakan|yang\s+membuat|penulis|peneliti|mahasiswa|dosen|pembina|atas\s+nama|a\.n\.|an\.)/i;
 const SELF_ROLE_RE = /(yang\s+menyatakan|yang\s+membuat|penulis|peneliti|mahasiswa)/i;
+/**
+ * Tata letak berdasarkan peran (mis. UNPAD FAPET): pemberi persetujuan (pembimbing, penguji) di
+ * kolom kanan, pengesah (ketua, dekan, kepala, …) di kolom kiri — apa pun posisinya di naskah asli.
+ */
+const RIGHT_ROLE_RE = /^(menyetujui|disetujui|pembimbing|co-?pembimbing|penguji)/i;
+const LEFT_ROLE_RE = /^(mengesahkan|disahkan|mengetahui|ketua|dekan|wakil|rektor|direktur|kepala|sekretaris|koordinator|kaprodi|atas\s+nama|a\.n\.|an\.)/i;
 const MATERAI_RE = /^\[?\s*(materai|meterai)/i;
 const ID_RE = /^(NIP|NIDN|NIDK|NIK|NIM|NPM|NRP|NISN|NUPTK)\b/i;
 const DEGREE_RE = /(\b(Prof|Dr|Drs|Dra|Ir|H|Hj)\.\s)|(,\s*(S|M|Dr|Ph|Sp|Ak|Apt)\.?\s?[A-Za-z]{0,6}\.?)|(\bPh\.?D\b)/;
@@ -122,7 +128,7 @@ function stripLeadingTabs(xml: string): string {
   return t === -1 ? xml : xml.slice(0, t).replace(/<w:tab\s*\/>/g, "") + xml.slice(t);
 }
 
-function fmtPara(xml: string, before: number, after: number, keepNext: boolean): string {
+function fmtPara(xml: string, before: number, after: number, keepNext: boolean, align: "center" | "left" = "center"): string {
   return withProps(stripLeadingTabs(xml), "w:pPr", {
     "w:pStyle": null,
     "w:keepNext": keepNext ? "<w:keepNext/>" : null,
@@ -132,7 +138,7 @@ function fmtPara(xml: string, before: number, after: number, keepNext: boolean):
     "w:tabs": null,
     "w:spacing": `<w:spacing w:before="${before}" w:after="${after}" w:line="240" w:lineRule="auto"/>`,
     "w:ind": `<w:ind w:left="0" w:right="0" w:firstLine="0"/>`,
-    "w:jc": `<w:jc w:val="center"/>`,
+    "w:jc": `<w:jc w:val="${align}"/>`,
   }, PPR_ORDER);
 }
 
@@ -142,21 +148,36 @@ function fmtRuns(xml: string, f: SigFmt): string {
     withProps(run, "w:rPr", { "w:rFonts": rFonts(f.font), "w:sz": sz(f.halfPts), "w:szCs": szCs(f.halfPts) }, RPR_ORDER));
 }
 
-/** Indeks baris tempat ruang tanda tangan disisipkan (sebelum nama / garis / mengapit materai). */
+/**
+ * Ruang tanda tangan sebelum SETIAP penanda tangan dalam satu sel (sebelum nama / garis tanda
+ * tangan / mengapit materai). Sel berisi dua penanda tangan (Pembimbing Utama & Anggota bertumpuk)
+ * mendapat ruang di atas kedua namanya.
+ */
 function signatureSpacing(kinds: K[]): Map<number, { before?: number; after?: number }> {
   const out = new Map<number, { before?: number; after?: number }>();
-  let nameIdx = kinds.findIndex((k) => k === "id") - 1;
-  if (nameIdx < 0) nameIdx = kinds.findIndex((k) => k === "name");
-  if (nameIdx < 0) {
+  const names: number[] = [];
+  kinds.forEach((k, i) => {
+    if (k === "id") return;
+    if (k === "name" || kinds[i + 1] === "id") {
+      // Nama + NIP berurutan dihitung sekali (pada nama).
+      if (!names.length || names[names.length - 1] !== i - 1 || kinds[i - 1] !== "name") names.push(i);
+    }
+  });
+  if (!names.length) {
     const m = kinds.findIndex((k) => k === "materai");
-    if (m !== -1 && m + 1 < kinds.length) nameIdx = m + 1;
+    if (m !== -1 && m + 1 < kinds.length) names.push(m + 1);
+    else {
+      const s = kinds.findIndex((k) => k === "sigline");
+      if (s !== -1) names.push(s);
+    }
   }
-  if (nameIdx < 0) nameIdx = kinds.findIndex((k) => k === "sigline");
-  if (nameIdx <= 0) return out;
-  const prev = kinds[nameIdx - 1];
-  if (prev === "materai") out.set(nameIdx - 1, { before: MATERAI_PAD, after: MATERAI_PAD });
-  else if (prev === "sigline") out.set(nameIdx - 1, { before: SIG_SPACE });
-  else out.set(nameIdx, { before: SIG_SPACE });
+  for (const nameIdx of names) {
+    if (nameIdx <= 0) continue;
+    const prev = kinds[nameIdx - 1];
+    if (prev === "materai") out.set(nameIdx - 1, { before: MATERAI_PAD, after: MATERAI_PAD });
+    else if (prev === "sigline") out.set(nameIdx - 1, { before: SIG_SPACE });
+    else out.set(nameIdx, { before: SIG_SPACE });
+  }
   return out;
 }
 
@@ -238,7 +259,7 @@ function cleanSignatureTable(t: TableNode, f: SigFmt, keepAfter: boolean, width:
       for (const p of ps) {
         const k = textual.indexOf(p);
         const s = k === -1 ? {} : sp.get(k) ?? {};
-        p.xml = fmtRuns(fmtPara(p.xml, s.before ?? 0, s.after ?? 0, !lastRow || keepAfter), f);
+        p.xml = fmtRuns(fmtPara(p.xml, s.before ?? 0, s.after ?? 0, !lastRow || keepAfter, f.align), f);
       }
     }
   });
@@ -252,12 +273,37 @@ export function buildSignatureTables(
   model: DocModel,
   nodes: (ParaNode | TableNode)[],
   outline: Outline,
-  opts: { width: number; font: string; halfPts: number; tables?: Set<number> },
+  opts: {
+    width: number; font: string; halfPts: number; tables?: Set<number>;
+    /** "author" = kolom mengikuti posisi di naskah; "roles" = pembimbing kanan, pengesah kiri. */
+    columns?: "author" | "roles";
+    /** Perataan teks di dalam kolom tanda tangan. */
+    textAlign?: "center" | "left";
+  },
 ): SigReport {
   const rep: SigReport = { blocks: 0, cleaned: 0, regions: [], added: { tables: 0, rows: 0, cells: 0 } };
   const itemOf = new Map<number, OutlineItem>();
   nodes.forEach((n, i) => { if (outline.items[i]) itemOf.set(n.id, outline.items[i]); });
-  const fmt: SigFmt = { font: opts.font, halfPts: opts.halfPts };
+  const fmt: SigFmt = { font: opts.font, halfPts: opts.halfPts, align: opts.textAlign ?? "center" };
+  const byRole = opts.columns === "roles";
+
+  // Tata letak berdasarkan peran: tabel tanda tangan asli diurai jadi paragraf lalu disusun ulang
+  // bersama blok paragraf (posisi kolomnya ditentukan peran, bukan sel asli).
+  const fromTable = new Set<number>();
+  if (byRole && opts.tables?.size) {
+    for (let k = 0; k < model.body.length; k++) {
+      const t = model.body[k];
+      if (t.kind !== "table" || !opts.tables.has(t.id)) continue;
+      const paras = t.rows.flatMap((r) => r.cells.flatMap((c) => cellParagraphs(c)));
+      if (!paras.length) continue;
+      paras.forEach((p) => fromTable.add(p.id));
+      model.body.splice(k, 1, ...paras);
+      rep.added.tables--;
+      rep.added.rows -= t.rows.length;
+      rep.added.cells -= t.rows.reduce((a, r) => a + r.cells.length, 0);
+      k += paras.length - 1;
+    }
+  }
 
   const prevContent = (at: number) => {
     for (let k = at - 1; k >= 0; k--) {
@@ -316,7 +362,8 @@ export function buildSignatureTables(
       const n = model.body[j];
       if (n.kind !== "paragraph") break;
       const it = itemOf.get(n.id);
-      if (!it || it.zone === "cover" || (it.role !== "body" && it.role !== "empty")) break;
+      const eligible = fromTable.has(n.id) || (it && it.zone !== "cover" && (it.role === "body" || it.role === "empty"));
+      if (!eligible) break;
       if (n.hasSectPr || n.hasPageBreak || n.hasDrawing || n.hasNumbering) break;
       if (isEmptyPara(n)) { if (lines.length) gap = true; j++; continue; }
       const parts = n.text.split(/\t+/).map((s) => s.trim()).filter(Boolean);
@@ -344,11 +391,36 @@ export function buildSignatureTables(
       });
     });
 
+    // Identitas penulis di bawah "OLEH :" (nama, NPM) adalah bagian judul halaman, bukan penanda
+    // tangan: blok tanda tangan baru dimulai pada baris peran/tanggal/materai pertama.
+    const before0 = prevContent(model.body.indexOf(lines[0].p));
+    if (before0?.kind === "paragraph" && /^(oleh|disusun\s+oleh|diajukan\s+oleh|by)\s*:?$/i.test(norm(before0.text))) {
+      while (lines.length && !lines[0].kinds.some((k) => k === "role" || k === "date" || k === "materai")) lines.shift();
+      if (!lines.length) { i = Math.max(i + 1, lastLineAt + 1); continue; }
+      lines[0].gapBefore = false;
+    }
+
     const all = lines.flatMap((l) => l.kinds);
     const anchored = all.some((k) => k === "name" || k === "id" || k === "sigline");
     const context = all.some((k) => k === "role" || k === "date" || k === "materai");
     const firstAt = model.body.indexOf(lines[0].p);
     if (!anchored || !context || lines.length < 2) { i = Math.max(i + 1, lastLineAt + 1); continue; }
+
+    // 2b. Tata letak berdasarkan peran: tiap baris ikut sisi peran di bawah/atasnya.
+    if (byRole) {
+      const sideOf = (l: Line): Cls | null => {
+        if (l.parts.length !== 1 || l.kinds[0] !== "role") return null;
+        return RIGHT_ROLE_RE.test(l.parts[0]) ? "right" : LEFT_ROLE_RE.test(l.parts[0]) ? "left" : null;
+      };
+      const sides = lines.map(sideOf);
+      let carry: Cls | null = null;
+      lines.forEach((l, li) => {
+        if (l.cls === "multi") { carry = null; return; }   // penanda tangan sejajar: biarkan berkolom
+        // Nama mengikuti keterangan peran tepat di bawahnya ("Pembimbing Utama"), lalu peran sebelumnya.
+        const own = sides[li] ?? (l.kinds[0] !== "role" ? sides[li + 1] : null) ?? carry;
+        if (own) { l.cls = own; carry = own; }
+      });
+    }
 
     // 3. Susun baris tabel.
     const N = Math.max(2, ...lines.map((l) => (l.cls === "multi" ? l.parts.length : 1)));
@@ -391,7 +463,7 @@ export function buildSignatureTables(
           const s = sp.get(k) ?? {};
           const after = k === items.length - 1 ? (lastRow ? 0 : rowGap) : (s.after ?? 0);
           const before = ri === 0 && k === 0 && needTopGap ? Math.max(s.before ?? 0, BLOCK_GAP) : (s.before ?? 0);
-          const x = fmtRuns(fmtPara(it.xml, before, after, !lastRow || keepAfter), fmt);
+          const x = fmtRuns(fmtPara(it.xml, before, after, !lastRow || keepAfter, fmt.align), fmt);
           const line = paragraphLine(x);
           if (line) { afterLines.push(line); afterTexts.push(line); }
           return x;

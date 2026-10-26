@@ -45,6 +45,8 @@ function signalsOf(n: OutlineInput, chapterIds: Set<number>): Signals {
         : {
             text: n.text, hasDrawing: n.hasDrawing, isTable: false,
             floatingOnly: n.hasDrawing && /<wp:anchor\b/.test(n.xml) && !/<wp:inline\b|<w:pict[\s>]|<w:object[\s>]/.test(n.xml),
+            pageEnd: n.hasSectPr || n.hasPageBreak,
+            pageStart: n.hadPageBreakBefore,
             captionStyled: /caption|keterangan/i.test(n.styleId ?? ""),
             chapterHint: chapterIds.has(n.id),
         };
