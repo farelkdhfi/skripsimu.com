@@ -37,4 +37,4 @@
    - Pernyataan: bingkai buatan penulis dalam 4 bentuk (tabel 1 sel, shape persegi, border paragraf, page border) dibuang sebelum kotak seragam; blok satu penanda tangan tetap paragraf; gambar melayang di dalam kotak dijaga tetap di dalam; paragraf penutup kotak setinggi 1 pt.
    - Indentasi gantung asli dipertahankan (kata kunci mulai di margin); Tab ketikan di awal paragraf isi dibuang.
    - Catatan tabel: butir bernomor yang menempel pada catatan lain tetap catatan, kecuali setelah "Sumber:" atau bila meneruskan daftar dari atas tabel.
-   - Gambar yang dijadikan inline diletakkan rata tengah.
+   - Gambar yang dijadikan inline diletakkan rata tengah. 
