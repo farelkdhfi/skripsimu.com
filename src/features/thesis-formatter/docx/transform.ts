@@ -55,6 +55,9 @@ import { alignListMarkers, flattenLists } from "./list-flat";
 import { originalBold, styleBoldOf, unifyHeadingWeight } from "./heading-weight";
 import { collapseStackedHeadings } from "./heading-stack";
 import { neutralizeAutoSpacing } from "./autospacing";
+import { applyTableLines, captureTableLook } from "./table-lines";
+import { blackenLinks } from "./link-color";
+import { fitCoverPages } from "./cover-fit";
 
 export type TransformResult = {
     buffer: Buffer;
@@ -315,6 +318,8 @@ export async function transformDocx(
     const lists = listRep.items;
 
     const sigTables = findSignatureTables(nodes, outline);
+    // Perataan & tebal sel tabel dicatat sebelum normalisasi (dipulihkan setelahnya).
+    const tableLook = captureTableLook(nodes, stylesXml ?? "");
     const report = applyFormat(model, outline, rules, {
         cleanupBlankPages: config.cleanupBlankPages,
         normalizeTables: config.normalizeTables,
@@ -377,6 +382,14 @@ export async function transformDocx(
         pageHeight: page.heightTwips - page.margin.top - page.margin.bottom,
         halfPts: rules.table().fontSize,
     });
+    if (config.normalizeTables) {
+        const tl = applyTableLines(nodes, outline, tableLook, {
+            lines: config.tableBorders === "minimal",
+            numericAlign: config.tableNumericAlign,
+            skip: sigTables,
+        });
+        if (tl.tables) notes.push(`${tl.tables} tabel dirapikan: ${config.tableBorders === "minimal" ? "garis horizontal di atas, di bawah header (judul kolom induk & baris satuan), di atas baris Jumlah/Total, dan di bawah tabel; " : ""}perataan & tebal judul kolom mengikuti naskah asli.`);
+    }
     const captions = { table: tableCaps, figure: figureCaps, notes: tableNotesFormatted };
     trace("05 keterangan tabel/gambar");
 
@@ -675,6 +688,9 @@ export async function transformDocx(
     trace("11 sampul, halaman kosong, cache daftar");
     /* -------- tulis kembali paket -------- */
 
+    // Setelah semua perapian teks: tautan hitam tanpa garis bawah, Daftar Pustaka hitam polos.
+    const ink = blackenLinks(model, pageInfo, stylesXml ?? "");
+    if (ink.links || ink.refs) notes.push(`Warna teks untuk cetak: ${ink.refs ? `${ink.refs} paragraf Daftar Pustaka dibuat hitam (tanpa stabilo/latar warna)` : ""}${ink.refs && ink.links ? "; " : ""}${ink.links ? `${ink.links} paragraf berisi tautan dibuat hitam tanpa garis bawah` : ""}. Tautan tetap bisa diklik.`);
     // Paling akhir, setelah semua modul mengatur spasi: spasi otomatis dari style dimatikan.
     const autoSp = neutralizeAutoSpacing(model, pageInfo, stylesXml ?? "");
     if (autoSp) notes.push(`${autoSp} paragraf ber-style "Normal (Web)" atau sejenisnya: spasi otomatis (HTML) dari style dimatikan agar jarak antarparagraf mengikuti aturan format.`);
@@ -729,6 +745,14 @@ export async function transformDocx(
     }));
 
     await patchHeadingStyles(zip);
+
+    // Sampul harus muat satu halaman: diukur dengan style FINAL; logo diperkecil bila meluber.
+    const coverFit = fitCoverPages(model, pageInfo, (await zip.file("word/styles.xml")?.async("string")) ?? "");
+    if (coverFit.scaled) {
+        zip.file("word/document.xml", serializeDocument(model));
+        notes.push(`Logo di ${coverFit.scaled} halaman sampul diperkecil (${coverFit.percent.join("%, ")}% dari ukuran asli) agar seluruh isi sampul muat dalam satu halaman.`);
+    }
+    if (coverFit.stillOverflow) notes.push(`${coverFit.stillOverflow} halaman sampul diperkirakan masih melebihi satu halaman walau logo sudah diperkecil maksimal. Kurangi baris kosong atau persingkat isi sampul.`);
 
     const buffer = await zip.generateAsync({
         type: "nodebuffer",
