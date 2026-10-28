@@ -64,7 +64,7 @@ import { buildFrontMatter, type FrontAI, type FrontReport } from "../front";
 import type { FrontFieldInput } from "../front/types";
 
 export type TransformResult = {
-    buffer: Buffer;
+    buffer: Uint8Array;
     outline: Outline;
     stats: ReturnType<typeof outlineStats>;
     report: ApplyReport;
@@ -821,7 +821,7 @@ export async function transformDocx(
     }))];
 
     const buffer = await zip.generateAsync({
-        type: "nodebuffer",
+        type: "uint8array",
         compression: "DEFLATE",
         compressionOptions: { level: 6 },
         mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",

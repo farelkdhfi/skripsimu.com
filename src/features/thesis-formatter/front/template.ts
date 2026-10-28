@@ -12,8 +12,6 @@
  *  - judul yang lebih panjang/pendek dari contoh diimbangi baris kosong sesudahnya, jadi isi
  *    halaman di bawahnya tetap di posisi template.
  */
-import { promises as fs } from "fs";
-import path from "path";
 import JSZip from "jszip";
 import { parseBlocks, parseDocument, serializeBlock, type BlockNode, type ParaNode } from "../docx/document-model";
 import { elementEnd, escapeXml, innerXml, mergeProps, openTag, splitElements, PPR_ORDER, RPR_ORDER } from "../docx/xml";
@@ -23,7 +21,25 @@ import { measureLines, type TextPiece } from "./metrics";
 import { FIELD_LABEL, type FrontFieldKey, type FrontFields, type FrontPageKind, type FrontSpec, type LineItem, type Pic, type Rich, type Seg } from "./types";
 
 const CM_EMU = 360000;
+/** Lokasi berkas template di proyek (sumber) dan URL publiknya (untuk pemrosesan di browser). */
 export const TEMPLATE_DIR = ["src", "features", "thesis-formatter", "presets", "templates"];
+export const TEMPLATE_URL = "/templates";
+
+/**
+ * Pemuat berkas template. Bawaan: diunduh dari `/templates/<file>` (folder `public/templates`),
+ * jadi bisa jalan di browser / Web Worker. Di Node (tes, server) diganti pemuat berkas lokal lewat
+ * `setTemplateLoader` (lihat front/node.ts).
+ */
+export type TemplateLoader = (file: string) => Promise<Uint8Array>;
+let loader: TemplateLoader = async (file) => {
+    const res = await fetch(`${TEMPLATE_URL}/${file}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return new Uint8Array(await res.arrayBuffer());
+};
+export function setTemplateLoader(fn: TemplateLoader): void {
+    loader = fn;
+    cache.clear();
+}
 
 /* ------------------------------------------------------------------ */
 /* Pemuatan template                                                    */
@@ -45,9 +61,6 @@ export type LoadedTemplate = {
 
 const cache = new Map<string, Promise<LoadedTemplate>>();
 
-export function templatePath(spec: FrontSpec): string {
-    return path.join(process.cwd(), ...TEMPLATE_DIR, spec.file);
-}
 
 /** Atribut & penanda yang tidak boleh ikut disalin (id revisi, bookmark contoh, penanda ejaan). */
 function clean(xml: string): string {
@@ -59,12 +72,11 @@ function clean(xml: string): string {
 }
 
 async function readTemplate(spec: FrontSpec): Promise<LoadedTemplate> {
-    const file = templatePath(spec);
-    let buf: Buffer;
+    let buf: Uint8Array;
     try {
-        buf = await fs.readFile(file);
-    } catch {
-        throw new TemplateError(`berkas template "${spec.file}" tidak ditemukan di ${path.join(...TEMPLATE_DIR)}.`);
+        buf = await loader(spec.file);
+    } catch (e) {
+        throw new TemplateError(`berkas template "${spec.file}" tidak bisa dimuat (${e instanceof Error ? e.message : e}). Pastikan berkasnya ada di public${TEMPLATE_URL}/ dan ${TEMPLATE_DIR.join("/")}/.`);
     }
     const zip = await JSZip.loadAsync(buf);
     const docXml = await zip.file("word/document.xml")?.async("string");
@@ -113,7 +125,7 @@ async function readTemplate(spec: FrontSpec): Promise<LoadedTemplate> {
 }
 
 export function loadTemplate(spec: FrontSpec): Promise<LoadedTemplate> {
-    const key = templatePath(spec);
+    const key = spec.file;
     let p = cache.get(key);
     if (!p) {
         p = readTemplate(spec);
@@ -538,6 +550,17 @@ async function ensureDefaultType(zip: JSZip, ext: string, type: string) {
     zip.file(p, xml.replace(/<Types\b[^>]*>/, (t) => `${t}<Default Extension="${ext}" ContentType="${type}"/>`));
 }
 
+/** Gabung & normalkan path di dalam paket ("word" + "../media/x.png" → "media/x.png"); tanpa modul path Node. */
+function posixJoin(base: string, rel: string): string {
+    const parts = (rel.startsWith("/") ? rel.slice(1) : `${base}/${rel}`).split("/");
+    const out: string[] = [];
+    for (const p of parts) {
+        if (!p || p === ".") continue;
+        if (p === "..") out.pop(); else out.push(p);
+    }
+    return out.join("/");
+}
+
 /** Gambar template (logo) disalin ke paket naskah; r:embed diarahkan ke relasi baru. */
 async function importMedia(target: JSZip, tpl: LoadedTemplate, xml: string, warn: (m: string) => void): Promise<string> {
     const ids = [...new Set([...xml.matchAll(/\br:(?:embed|id|link)="([^"]+)"/g)].map((m) => m[1]))];
@@ -545,11 +568,11 @@ async function importMedia(target: JSZip, tpl: LoadedTemplate, xml: string, warn
     for (const id of ids) {
         const rel = tpl.rels.get(id);
         if (!rel || rel.type !== IMAGE_REL || rel.mode === "External") { warn(`Objek template dengan relasi ${id} tidak didukung dan dilewati.`); continue; }
-        const src = path.posix.normalize(path.posix.join("word", rel.target));
+        const src = posixJoin("word", rel.target);
         const data = await tpl.zip.file(src)?.async("uint8array");
         if (!data) continue;
         const ext = (/\.(\w+)$/.exec(src)?.[1] ?? "png").toLowerCase();
-        const name = `media/fmttpl_${path.posix.basename(src)}`;
+        const name = `media/fmttpl_${src.split("/").pop()}`;
         target.file(`word/${name}`, data);
         await ensureDefaultType(target, ext, IMAGE_TYPES[ext] ?? "application/octet-stream");
         map.set(id, await findOrAddRelationship(target, name, IMAGE_REL));
@@ -561,7 +584,7 @@ async function importMedia(target: JSZip, tpl: LoadedTemplate, xml: string, warn
 async function importFooter(target: JSZip, tpl: LoadedTemplate, rId: string, n: number): Promise<string | null> {
     const rel = tpl.rels.get(rId);
     if (!rel) return null;
-    let xml = await tpl.zip.file(path.posix.join("word", rel.target))?.async("string");
+    let xml = await tpl.zip.file(posixJoin("word", rel.target))?.async("string");
     if (!xml) return null;
     xml = applyStyles(clean(xml), new Set());
     const name = `footerFmtTpl${n}.xml`;

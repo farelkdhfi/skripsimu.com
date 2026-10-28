@@ -17,6 +17,8 @@ import { configForPreset } from "../src/features/thesis-formatter/schemas/format
 import { flatten, parseDocument, type ParaNode, type TableNode } from "../src/features/thesis-formatter/docx/document-model";
 import { fingerprint } from "../src/features/thesis-formatter/docx/verify";
 import { countAutoSpacing } from "../src/features/thesis-formatter/docx/autospacing";
+import { useNodeIO } from "../src/features/thesis-formatter/front/node";
+useNodeIO();
 
 const ROOT = path.resolve("test-docs");
 const OUT = path.join(ROOT, "__out__");

@@ -484,20 +484,18 @@ async function aiRead(ai: FrontAI | undefined, items: Item[], pageOf: Map<Item, 
 
 /**
  * Rekaman diagnosis: bila ada isian kosong/ditolak/berbeda atau pemeriksaan gagal, daftar baris
- * bagian depan + jawaban AI + keputusan disimpan ke berkas JSON kecil (bukan naskahnya). Berkas ini
- * cukup untuk menelusuri masalah dan bisa diputar ulang sebagai tes (`frontAI` di test-docs).
- * Lokasi: FRONT_DEBUG_DIR, atau folder "front-debug" di proyek (tidak di produksi).
+ * bagian depan + jawaban AI + keputusan dikirim ke "penampung" (bukan naskahnya). Bawaan: dicetak
+ * ke console (browser: DevTools → Console). Di Node (front/node.ts) disimpan sebagai berkas JSON di
+ * folder front-debug. Berkas ini bisa diputar ulang sebagai tes (`frontAI` di test-docs).
  */
+export type DiagnosisSink = (payload: Record<string, unknown>) => Promise<void> | void;
+let diagnosisSink: DiagnosisSink = (payload) => {
+    console.info("[front-template] rekaman diagnosis (salin JSON ini bila melaporkan masalah):", JSON.stringify(payload));
+};
+export function setDiagnosisSink(fn: DiagnosisSink): void { diagnosisSink = fn; }
+
 async function saveDiagnosis(payload: Record<string, unknown>): Promise<void> {
-    const dir = process.env.FRONT_DEBUG_DIR ?? (process.env.NODE_ENV === "production" ? null : `${process.cwd()}/front-debug`);
-    if (!dir) return;
-    try {
-        const { mkdir, writeFile } = await import("node:fs/promises");
-        await mkdir(dir, { recursive: true });
-        const name = `${new Date().toISOString().replace(/[:.]/g, "-")}-${String(payload.nama ?? "naskah").replace(/[^A-Za-z0-9]+/g, "_").slice(0, 40)}.json`;
-        await writeFile(`${dir}/${name}`, JSON.stringify(payload, null, 2), "utf8");
-        console.info(`[front-template] rekaman diagnosis: ${dir}/${name}`);
-    } catch (e) {
+    try { await diagnosisSink(payload); } catch (e) {
         console.warn("[front-template] rekaman diagnosis gagal disimpan:", e instanceof Error ? e.message : e);
     }
 }
@@ -528,7 +526,7 @@ export async function analyzeFront(model: DocModel, config: FormatConfig, ai?: F
 }
 
 /** Sama dengan analyzeFront, langsung dari berkas DOCX (untuk endpoint form konfirmasi). */
-export async function analyzeFrontDocx(input: Buffer | ArrayBuffer | Uint8Array, config: FormatConfig, ai?: FrontAI): Promise<FrontReport> {
+export async function analyzeFrontDocx(input: ArrayBuffer | Uint8Array, config: FormatConfig, ai?: FrontAI): Promise<FrontReport> {
     const zip = await JSZip.loadAsync(input);
     const xml = await zip.file("word/document.xml")?.async("string");
     if (!xml) return empty("file bukan DOCX yang sah.");
