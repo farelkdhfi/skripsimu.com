@@ -26,7 +26,7 @@ type ListKind = "contents" | "tables" | "figures" | "appendices";
 /** Potongan teks dengan tanda miring. */
 type Seg = { t: string; i: boolean };
 type Row =
-  | { type: "front"; text: string; target: ParaNode }
+  | { type: "front"; text: string; target?: ParaNode; bookmark?: string }
   | { type: "chapter"; label: string; text: string; segs: Seg[] }
   | { type: "section" | "subsection"; num: string; text: string; segs: Seg[]; target: ParaNode }
   | { type: "item"; num: string; text: string; segs: Seg[]; target: ParaNode };
@@ -170,7 +170,11 @@ export function buildColumnLists(
   model: DocModel,
   nodes: (ParaNode | TableNode)[],
   outline: Outline,
-  o: { width: number; font: string; halfPts: number; bodyLine: number; upper: boolean; exact: boolean },
+  o: {
+    width: number; font: string; halfPts: number; bodyLine: number; upper: boolean; exact: boolean;
+    /** Judul bagian depan yang disusun template (sudah ber-bookmark), dicantumkan paling awal di Daftar Isi. */
+    frontRows?: { text: string; bookmark: string }[];
+  },
 ): { report: TocReport; regions: VerifyRegion[] } {
   const report: TocReport = { tocs: 0, entries: 0, replaced: 0, unwrapped: unwrapTocControls(model) };
   const regions: VerifyRegion[] = [];
@@ -201,7 +205,7 @@ export function buildColumnLists(
   };
 
   /* ---- entri ---- */
-  const contents: Row[] = [];
+  const contents: Row[] = (o.frontRows ?? []).map((r) => ({ type: "front" as const, text: r.text, bookmark: r.bookmark }));
   const tables: Row[] = [];
   const figures: Row[] = [];
   const appendices: Row[] = [];
@@ -373,7 +377,7 @@ export function buildColumnLists(
       if (r.type === "front") {
         const before = prev === null ? half : prev !== "front" ? half : 0;
         out.push(para({ left: COL, before, line: o.bodyLine, dotEnd },
-          run(r.text, true) + tab(true) + tab(true) + ref(mark(r.target), pageOf(cache, r.text), true)));
+          run(r.text, true) + tab(true) + tab(true) + ref(r.bookmark ?? mark(r.target!), pageOf(cache, r.text), true)));
       } else if (r.type === "chapter") {
         // Baris bab: tanpa titik-titik & tanpa nomor halaman; tetap tidak masuk kolom "Halaman".
         out.push(para({ left: COL, hanging: COL, before: half, line: o.bodyLine, keepNext: true, noLeader: true, dotEnd, center: numCenter },

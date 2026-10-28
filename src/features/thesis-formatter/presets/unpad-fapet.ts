@@ -1,4 +1,5 @@
 import type { CampusPreset } from "./index";
+import { UNPAD_FAPET_FRONT } from "./unpad-fapet.front";
 
 /**
  * Panduan Penulisan Usulan Penelitian dan Tugas Akhir Program Sarjana
@@ -65,4 +66,5 @@ export const UNPAD_FAPET: CampusPreset = {
     referenceHanging: 1.27,
     referenceGap: true,
   },
+  front: UNPAD_FAPET_FRONT,
 };

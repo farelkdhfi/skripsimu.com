@@ -7,7 +7,9 @@ import type { Signals } from "../structure/roles";
 import type { FormatConfig } from "../schemas/format-config";
 import type { DocStats, FormatResult, IntegrityCheck } from "../types";
 import { extractCoverAI } from "./cover-ai.service";
+import { extractFrontAI } from "./front-ai.service";
 import { presetById } from "../presets";
+import type { FrontFieldInput } from "../front/types";
 
 const EMPTY_STATS: DocStats = {
   chapters: 0, sections: 0, subsections: 0, figures: 0, figureCaptions: 0,
@@ -43,7 +45,7 @@ function describeChanges(c: FormatConfig, s: DocStats, extra: string[]): string[
 /* Jalur DOCX — menyunting dokumen asli di tempat                       */
 /* ------------------------------------------------------------------ */
 
-async function formatFromDocx(file: File, c: FormatConfig): Promise<FormatResult> {
+async function formatFromDocx(file: File, c: FormatConfig, frontFields?: FrontFieldInput): Promise<FormatResult> {
   const input = Buffer.from(await file.arrayBuffer());
 
   // AI dijalankan lebih dulu atas teks node, tetapi hasilnya hanya mengisi
@@ -62,15 +64,17 @@ async function formatFromDocx(file: File, c: FormatConfig): Promise<FormatResult
   );
 
   const ai = await classifyNodes(signals);
-  const result = await transformDocx(input, c, { aiRoles: ai.roles, coverAI: extractCoverAI });
+  const result = await transformDocx(input, c, { aiRoles: ai.roles, coverAI: extractCoverAI, frontFields, frontAI: extractFrontAI });
 
   const failed = (prefix: string) => result.issues.some((i) => i.message.startsWith(prefix));
-  const sig = result.signatures.added;
+  // Jumlah yang diharapkan = asli + perubahan yang SENGAJA dibuat (bagian depan dari template,
+  // blok tanda tangan, bingkai pernyataan). Selisih di luar itu = ada yang hilang.
+  const want = result.intended;
   const integrity: IntegrityCheck[] = [
-    { label: "Gambar & objek", before: result.before.drawings, after: result.after.drawings, ok: !failed("") || result.after.drawings >= result.before.drawings },
-    { label: "Tabel", before: result.before.tables, after: result.after.tables, ok: result.after.tables === result.before.tables - result.coverRemoved.tables },
-    { label: "Baris tabel", before: result.before.rows, after: result.after.rows, ok: result.after.rows === result.before.rows - result.coverRemoved.rows },
-    { label: "Sel tabel", before: result.before.cells, after: result.after.cells, ok: result.after.cells === result.before.cells - result.coverRemoved.cells },
+    { label: "Gambar & objek", before: result.before.drawings, after: result.after.drawings, ok: result.after.drawings >= result.before.drawings + want.drawings },
+    { label: "Tabel", before: result.before.tables, after: result.after.tables, ok: result.after.tables === result.before.tables + want.tables },
+    { label: "Baris tabel", before: result.before.rows, after: result.after.rows, ok: result.after.rows === result.before.rows + want.rows },
+    { label: "Sel tabel", before: result.before.cells, after: result.after.cells, ok: result.after.cells === result.before.cells + want.cells },
     { label: "Teks dokumen", before: `${result.before.text.length} karakter`, after: `${result.after.text.length} karakter`, ok: !failed("Teks dokumen") },
   ];
 
@@ -82,7 +86,9 @@ async function formatFromDocx(file: File, c: FormatConfig): Promise<FormatResult
   if (!result.issues.length) {
     validation.push({
       level: "ok",
-      message: "Isi, tabel, dan gambar dokumen asli terverifikasi utuh: teks identik, jumlah tabel, baris, sel, dan gambar tidak berubah.",
+      message: result.front.built
+        ? "Isi naskah di luar bagian depan terverifikasi utuh (teks, tabel, dan gambar). Bagian depan disusun ulang dari template; datanya diperiksa ada di teks asli."
+        : "Isi, tabel, dan gambar dokumen asli terverifikasi utuh: teks identik, jumlah tabel, baris, sel, dan gambar tidak berubah.",
     });
   }
   if (result.stats.chapters === 0)
@@ -190,13 +196,14 @@ async function formatFromPdf(file: File, paragraphs: string[], c: FormatConfig):
 
 /* ------------------------------------------------------------------ */
 
-export async function formatThesis(file: File, c: FormatConfig): Promise<FormatResult> {
+/** `frontFields`: isian data bagian depan dari form konfirmasi (opsional). */
+export async function formatThesis(file: File, c: FormatConfig, frontFields?: FrontFieldInput): Promise<FormatResult> {
   const isDocx = /\.docx$/i.test(file.name) ||
     file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
   // DOCX tidak pernah melewati ekstraksi teks: begitu dokumen menjadi array
   // string, tabel dan gambar sudah hilang sebelum format diterapkan.
-  if (isDocx) return formatFromDocx(file, c);
+  if (isDocx) return formatFromDocx(file, c, frontFields);
 
   const { paragraphs } = await extractParagraphs(file);
   if (paragraphs.length < 3)

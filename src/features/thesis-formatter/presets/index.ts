@@ -1,5 +1,6 @@
 import type { FormatConfig } from "../schemas/format-config";
 import { UNPAD_FAPET } from "./unpad-fapet";
+import type { FrontSpec } from "../front/types";
 
 export type CampusPreset = {
   id: string;
@@ -11,6 +12,8 @@ export type CampusPreset = {
   /** Penjelasan singkat untuk pengguna: apa yang diatur & apa yang perlu diperiksa manual. */
   notes: string[];
   config: Partial<Omit<FormatConfig, "presetId" | "docType">>;
+  /** Template bagian depan (sampul s.d. abstract). Tanpa ini bagian depan dirapikan cara lama. */
+  front?: FrontSpec;
 };
 
 export const UMUM: CampusPreset = {

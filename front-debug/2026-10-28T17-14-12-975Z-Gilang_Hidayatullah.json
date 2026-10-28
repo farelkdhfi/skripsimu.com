@@ -1,0 +1,106 @@
+{
+  "versi": "2026-10-29.1",
+  "preset": "unpad-fapet",
+  "nama": "Gilang Hidayatullah",
+  "isian": {
+    "judul": "Pengaruh Penambahan Starter pada Proses Fermentasi Feses Ayam Layer sebagai Media Tumbuh Maggot Black Soldier Fly (Hermetia illucens) terhadap Pertumbuhan dan Lama Waktu mencapai Prepupa",
+    "judulInggris": "Effect of Starter Addition during Fermentation of Layer Chicken Manure as a Growth Medium on Growth Performance and Time to Reach the Prepupal Stage of Black Soldier Fly (Hermetia illucens) Larvae",
+    "nama": "Gilang Hidayatullah",
+    "npm": "200110220086",
+    "tahun": "2026",
+    "pembimbingUtama": "Dr. Sauland Sinaga, S.Pt., M.Si.",
+    "pembimbingAnggota": "Dr. Muh. Fatah Wiyatna, S.Pt., M.Si.",
+    "ketuaSidang": null,
+    "dekan": "Prof. Dr. Ir. Heni Indrijani, S.Pt., M.Si., IPU",
+    "tanggalSidang": null,
+    "tempatTanggalPernyataan": "Jatinangor, September 2026",
+    "tempatTanggalKataPengantar": "Jatinangor, Oktober 2026"
+  },
+  "sumber": {
+    "judul": "ai",
+    "judulInggris": "ai",
+    "nama": "ai",
+    "npm": "ai",
+    "tahun": "ai",
+    "pembimbingUtama": "ai",
+    "pembimbingAnggota": "ai",
+    "ketuaSidang": null,
+    "dekan": "ai",
+    "tanggalSidang": null,
+    "tempatTanggalPernyataan": "ai",
+    "tempatTanggalKataPengantar": "bawaan"
+  },
+  "kosong": [
+    "ketuaSidang",
+    "tanggalSidang"
+  ],
+  "ditolakAI": [
+    "tanggalSidang (bukan tanggal sidang/ujian sarjana)"
+  ],
+  "perbedaan": [
+    "Kata pengantar: rentang AI lebih pendek dari isi naskah; dipakai bacaan aturan agar tidak ada teks yang hilang."
+  ],
+  "catatan": [
+    "Jabatan di lembar pengesahan naskah \"Wakil Dekan Fakultas 1 Peternakan\" (Prof. Dr. Ir. Heni Indrijani, S.Pt., M.Si., IPU) dipasang pada posisi Dekan di template; label jabatan mengikuti template. Periksa apakah sudah sesuai.",
+    "Tanggal di lembar pengesahan naskah (\"Tanggal Pelaksanaan SUP : 6 Juli 2026\") bukan tanggal sidang/ujian sarjana, jadi tidak dipakai; tanggal sidang di template dikosongkan."
+  ],
+  "masalah": [],
+  "tidakTerbaca": [],
+  "jawabanAI": {
+    "judul": [
+      1
+    ],
+    "judulInggris": [
+      2
+    ],
+    "nama": {
+      "baris": 4,
+      "teks": "Gilang Hidayatullah"
+    },
+    "npm": {
+      "baris": 15,
+      "teks": "200110220086"
+    },
+    "tahun": {
+      "baris": 9,
+      "teks": "2026"
+    },
+    "pembimbingUtama": {
+      "baris": 40,
+      "teks": "Dr. Sauland Sinaga, S.Pt., M.Si."
+    },
+    "pembimbingAnggota": {
+      "baris": 42,
+      "teks": "Dr. Muh. Fatah Wiyatna, S.Pt., M.Si."
+    },
+    "ketuaSidang": null,
+    "dekan": {
+      "baris": 44,
+      "teks": "Prof. Dr. Ir. Heni Indrijani, S.Pt., M.Si., IPU"
+    },
+    "tanggalSidang": {
+      "baris": 46,
+      "teks": "6 Juli 2026"
+    },
+    "tempatTanggalPernyataan": {
+      "baris": 32,
+      "teks": "Jatinangor, September 2026"
+    },
+    "tempatTanggalKataPengantar": null,
+    "kataPengantar": {
+      "dari": 47,
+      "sampai": 51
+    },
+    "abstrak": null,
+    "kataKunci": null,
+    "abstract": null,
+    "keywords": null,
+    "ttdPembimbingUtama": null,
+    "ttdPembimbingAnggota": null,
+    "ttdKetuaSidang": null,
+    "ttdDekan": null,
+    "ttdPernyataan": null,
+    "ttdKataPengantar": null
+  },
+  "daftarBaris": "=== HALAMAN 1 (dugaan: sampul muka) ===\nL1: Pengaruh Penambahan Starter pada Proses Fermentasi Feses Ayam Layer sebagai Media Tumbuh Maggot Black Soldier Fly (Hermetia illucens) terhadap Pertumbuhan dan Lama Waktu mencapai Prepupa\nL2: Effect of Starter Addition during Fermentation of Layer Chicken Manure as a Growth Medium on Growth Performance and Time to Reach the Prepupal Stage of Black Soldier Fly (Hermetia illucens) Larvae\nL3: SKRIPSI\nL4: Gilang Hidayatullah\nG1: [gambar 3.6×3.6 cm]\nL5: Program Studi Sarjana Peternakan\nL6: Fakultas Peternakan\nL7: Universitas Padjadjaran\nL8: Jatinangor\nL9: 2026\n=== HALAMAN 2 (dugaan: sampul kedua) ===\nL10: Pengaruh Penambahan Starter pada Proses Fermentasi Feses Ayam Layer sebagai Media Tumbuh Maggot Black Soldier Fly (Hermetia illucens) terhadap Pertumbuhan dan Lama Waktu mencapai Prepupa\nL11: Effect of Starter Addition during Fermentation of Layer Chicken Manure as a Growth Medium on Growth Performance and Time to Reach the Prepupal Stage of Black Soldier Fly (Hermetia illucens) Larvae\nL12: Skripsi\nL13: Diajukan untuk memperoleh gelar Sarjana\nL14: Gilang Hidayatullah\nL15: 200110220086\nG2: [gambar 3.6×3.6 cm]\nL16: Program Studi Sarjana Peternakan\nL17: Fakultas Peternakan\nL18: Universitas Padjadjaran\nL19: Jatinangor\nL20: 2026\n=== HALAMAN 3 (dugaan: lembar pernyataan) ===\nG3: [bentuk/kotak 14.5×22.8 cm]\nL21: LEMBAR PERNYATAAN TIDAK MELAKUKAN PLAGIASI\nL22: Yang bertanda tangan di bawah ini, saya:\nL23: Nama\nL24: : Gilang Hidayatullah\nL25: NPM\nL26: : 200110220086\nL27: JUDUL SKRIPSI\nL28: : Pengaruh Penambahan Starter pada Proses Fermentasi Feses Ayam Layer sebagai Media Tumbuh Maggot Black Soldier Fly (Hermetia illucens) terhadap Pertumbuhan dan Lama Waktu mencapai Prepupa\nL29: Menyatakan bahwa tulisan dalam skripsi ini merupakan hasil penelitian penulis, data dan tulisan ini bukan hasil karya orang lain, ditulis dengan kaidah-kaidah ilmiah dan belum pernah dipublikasikan.\nL30: Demikian pernyataan ini dibuat dengan sebenar-benarnya, tanpa tekanan\nL31: dari pihak manapun. Penulis bersedia menanggung konsekuensi hukum apabila ditemukan kesalahan dalam pernyataan ini.\nL32: Dibuat di Jatinangor, September 2026\nL33: Penulis,\nL34: Gilang Hidayatullah\n=== HALAMAN 4 (dugaan: lembar pengesahan) ===\nL35: PENGARUH PENAMBAHAN STARTER PADA PROSES FERMENTASI FESES AYAM LAYER SEBAGAI MEDIA TUMBUH MAGGOT BLACK SOLDIER FLY (HERMETIA ILLUCENS) TERHADAP PERTUMBUHAN DAN LAMA WAKTU MENCAPAI PREPUPA\nL36: OLEH :\nL37: GILANG HIDAYATULLAH\nL38: NPM. 200110220086\nL39: Menyetujui :\nL40: Dr. Sauland Sinaga, S.Pt., M.Si.\nL41: Pembimbing Utama\nL42: Dr. Muh. Fatah Wiyatna, S.Pt., M.Si.\nL43: Pembimbing Anggota\nL44: Prof. Dr. Ir. Heni Indrijani, S.Pt., M.Si., IPU\nL45: Wakil Dekan Fakultas 1 Peternakan\nL46: Tanggal Pelaksanaan SUP : 6 Juli 2026\n=== HALAMAN 5 (dugaan: kata pengantar) ===\nL47: KATA PENGANTAR\nL48: Puji dan Syukur penulis sampaikan kepada Allah SWT yang telah melimpahkan rahmat dan karunia-Nya sehingga penulis dapat menyelesaikan proposal usulan penelitian yang berjudul “Pengaruh Penambahan Starter pada Proses Ferm…\nL49: Penulis banyak dibantu serta dukungan oleh berbagai pihak sehingga pada kesempatan ini penulis menyampaikan terima kasih kepada Dr. Sauland Sinaga, S.Pt., M.Si. selaku dosen pembimbing utama dan Dr. Muh. Fatah Wiyatna, S…\nL50: Penulis juga mengucapkan terima kasih kepada Prof. Dr. Ir. Rahmat Hidayat, S.Pt., M.Si., IPM., selaku Dekan Fakultas Peternakan Universitas Padjadjaran, Prof. Dr. Ir. Heni Indrijani, S.Pt., M.Si., IPU., dan Dr. Ir. Andre…\nL51: Ucapan terima kasih yang mendalam juga tak lupa penulis sampaikan kepada orang tua tercinta Ibunda Yeni Sulastri dan Ayahanda Ardi serta keluarga besar, yang senantiasa memberikan doa, restu, serta dukungan moral dan mat…\nL52: Akhir kata semoga rencana usulan penelitian ini dapat terlaksana dengan baik dan memberikan manfaat kepada penulis sendiri dan semua pihak. Semoga amal dan segala kebaikan yang telah diberikan semua pihak mendapat balasa…"
+}

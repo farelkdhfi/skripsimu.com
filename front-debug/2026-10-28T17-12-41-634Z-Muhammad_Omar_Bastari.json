@@ -1,0 +1,117 @@
+{
+  "versi": "2026-10-29.1",
+  "preset": "unpad-fapet",
+  "nama": "Muhammad Omar Bastari",
+  "isian": {
+    "judul": "Pengaruh Imbangan Feses Domba dan Sisa Pakan sebagai Media Pertumbuhan Maggot terhadap Penyusutan Substrat dan Produksi Maggot",
+    "judulInggris": "The Effect of Sheep Feces and Feed Residues as Maggot Growth Media on Substrate Shrinkation and Maggot Production",
+    "nama": "Muhammad Omar Bastari",
+    "npm": "200110220107",
+    "tahun": "2026",
+    "pembimbingUtama": "Prof. Dr. Ir. Yuli Astuti Hidayati, MP.",
+    "pembimbingAnggota": "Dr. Ir. Eulis Tanti Marlina, S.Pt., MP., IPU.",
+    "ketuaSidang": null,
+    "dekan": "Prof. Dr. Ir. Heni Indrijani, S.Pt., M.Si., IPU.",
+    "tanggalSidang": null,
+    "tempatTanggalPernyataan": "Jatinangor, 13 Oktober 2026",
+    "tempatTanggalKataPengantar": "Sumedang, 22 September 2026"
+  },
+  "sumber": {
+    "judul": "aturan",
+    "judulInggris": "aturan",
+    "nama": "ai",
+    "npm": "ai",
+    "tahun": "ai",
+    "pembimbingUtama": "ai",
+    "pembimbingAnggota": "ai",
+    "ketuaSidang": null,
+    "dekan": "ai",
+    "tanggalSidang": null,
+    "tempatTanggalPernyataan": "ai",
+    "tempatTanggalKataPengantar": "ai"
+  },
+  "kosong": [
+    "ketuaSidang",
+    "tanggalSidang"
+  ],
+  "ditolakAI": [
+    "judul (judul & judul Inggris menunjuk baris yang sama)",
+    "judulInggris (judul & judul Inggris menunjuk baris yang sama)",
+    "tanggalSidang (bukan tanggal sidang/ujian sarjana)",
+    "tanda tangan pembimbingUtama"
+  ],
+  "perbedaan": [],
+  "catatan": [
+    "Jabatan di lembar pengesahan naskah \"Wakil Dekan I Fakultas Peternakan\" (Prof. Dr. Ir. Heni Indrijani, S.Pt., M.Si., IPU.) dipasang pada posisi Dekan di template; label jabatan mengikuti template. Periksa apakah sudah sesuai.",
+    "Tanggal di lembar pengesahan naskah (\"Tanggal Sidang Usulan Penelitian : 15 Juni 2026\") bukan tanggal sidang/ujian sarjana, jadi tidak dipakai; tanggal sidang di template dikosongkan."
+  ],
+  "masalah": [],
+  "tidakTerbaca": [],
+  "jawabanAI": {
+    "judul": [
+      1,
+      2
+    ],
+    "judulInggris": [
+      2
+    ],
+    "nama": {
+      "baris": 4,
+      "teks": "Muhammad Omar Bastari"
+    },
+    "npm": {
+      "baris": 5,
+      "teks": "200110220107"
+    },
+    "tahun": {
+      "baris": 7,
+      "teks": "2026"
+    },
+    "pembimbingUtama": {
+      "baris": 31,
+      "teks": "Prof. Dr. Ir. Yuli Astuti Hidayati, MP."
+    },
+    "pembimbingAnggota": {
+      "baris": 33,
+      "teks": "Dr. Ir. Eulis Tanti Marlina, S.Pt., MP., IPU."
+    },
+    "ketuaSidang": null,
+    "dekan": {
+      "baris": 36,
+      "teks": "Prof. Dr. Ir. Heni Indrijani, S.Pt., M.Si., IPU."
+    },
+    "tanggalSidang": {
+      "baris": 38,
+      "teks": "15 Juni 2026"
+    },
+    "tempatTanggalPernyataan": {
+      "baris": 23,
+      "teks": "Jatinangor, 13 Oktober 2026"
+    },
+    "tempatTanggalKataPengantar": {
+      "baris": 45,
+      "teks": "Sumedang, 22 September 2026"
+    },
+    "kataPengantar": {
+      "dari": 39,
+      "sampai": 44
+    },
+    "abstrak": {
+      "dari": 49,
+      "sampai": 52
+    },
+    "kataKunci": 52,
+    "abstract": {
+      "dari": 55,
+      "sampai": 57
+    },
+    "keywords": 57,
+    "ttdPembimbingUtama": "G7",
+    "ttdPembimbingAnggota": null,
+    "ttdKetuaSidang": null,
+    "ttdDekan": null,
+    "ttdPernyataan": null,
+    "ttdKataPengantar": null
+  },
+  "daftarBaris": "=== HALAMAN 1 (dugaan: sampul muka) ===\nL1: Pengaruh Imbangan Feses Domba dan Sisa Pakan sebagai Media Pertumbuhan Maggot terhadap Penyusutan Substrat dan Produksi Maggot\nL2: The Effect of Sheep Feces and Feed Residues as Maggot Growth Media on Substrate Shrinkation and Maggot Production\nL3: SKRIPSI\nL4: Muhammad Omar Bastari\nL5: 200110220107\nG1: [gambar 4.6×4.6 cm]\nL6: Program Studi Sarjana Peternakan Fakultas Peternakan Universitas Padjajaran\nL7: Sumedang 2026\n=== HALAMAN 2 (dugaan: sampul kedua) ===\nL8: Pengaruh Imbangan Feses Domba dan Sisa Pakan sebagai Media Pertumbuhan Maggot terhadap Penyusutan Substrat dan Produksi Maggot\nL9: The Effect of Sheep Feces and Feed Residues as Maggot Growth Media on Substrate Shrinkation and Maggot Production\nL10: Skripsi\nL11: Diajukan untuk memperoleh gelar Sarjana\nL12: Muhammad Omar Bastari\nL13: 200110220107\nG2: [gambar 4.6×4.6 cm]\nL14: Program Studi Sarjana Peternakan Fakultas Peternakan Universitas Padjajaran\nL15: Sumedang 2026\n=== HALAMAN 3 (dugaan: lembar pernyataan) ===\nL16: LEMBAR PERNYATAAN TIDAK MELAKUKAN PLAGIASI\nL17: Yang bertanda tangan di bawah ini, saya:\nL18: Nama : Muhammad Omar Bastari\nL19: NPM 200110220107\nL20: JUDUL SKRIPSI : Pengaruh Imbangan Feses Domba dan Sisa Pakan sebagai Media Pertumbuhan Maggot terhadap Penyusutan Substrat dan Produksi Maggot\nL21: Menyatakan bahwa tulisan dalam skripsi ini merupakan hasil penelitian penulis, data dan tulisan ini bukan hasil karya orang lain, ditulis dengan kaidah-kaidah ilmiah dan belum pernah dipublikasikan.\nL22: Demikian pernyataan ini dibuat dengan sebenar-benarnya, tanpa tekanan dari pihak manapun. Penulis bersedia menanggung konsekuensi hukum apabila ditemukan kesalahan dalam pernyataan ini.\nL23: Dibuat di Jatinangor, 13 Oktober 2026\nL24: Penulis,\nG3: [bentuk/kotak 2.5×1.9 cm]\nG4: [gambar 1.8×1.8 cm]\nL25: Muhammad Omar Bastari\nG5: [bentuk/kotak 0.1×0.1 cm]\n=== HALAMAN 4 (dugaan: lembar pengesahan) ===\nL26: PENGARUH IMBANGAN FESES DOMBA DAN SISA PAKAN SEBAGAI MEDIA PERTUMBUHAN MAGGOT TERHADAP PENYUSUTAN SUBSTRAT DAN PRODUKSI MAGGOT\nG6: [gambar 8.6×5.2 cm]\nL27: OLEH:\nL28: MUHAMMAD OMAR BASTARI\nL29: NPM. 200110220107\nL30: Menyetujui:\nG7: [bentuk/kotak 6.3×7.4 cm]\nL31: Prof. Dr. Ir. Yuli Astuti Hidayati, MP.\nL32: Pembimbing Utama\nL33: Dr. Ir. Eulis Tanti Marlina, S.Pt., MP., IPU.\nL34: Pembimbing Anggota\nL35: Mengesahkan:\nL36: Prof. Dr. Ir. Heni Indrijani, S.Pt., M.Si., IPU.\nL37: Wakil Dekan I Fakultas Peternakan\nL38: Tanggal Sidang Usulan Penelitian : 15 Juni 2026\n=== HALAMAN 5 (dugaan: kata pengantar) ===\nL39: KATA PENGANTAR\nL40: Puji serta syukur penulis panjatkan kehadirat Allah SWT yang telah memberi karunia, rahmat, dan hidayah-Nya penulis dapat menyelesaikan penelitian dan penyusunan skripsi yang berjudul “Pengaruh Imbangan Feses Domba dan S…\nL41: Penelitian dan penyusunan skripsi ini tidak lepas dari bantuan dan bimbingan serta dukungan dari berbagai pihak. Maka dari itu, pada kesempatan ini penulis hendak menyampaikan penghargaan dan terimakasih sebesar-besarnya…\nL42: Penulis juga menyampaikan ucapan terimakasih kepada Dekan Fakultas Peternakan Universitas Padjadjaran Prof. Dr. Ir. Rahmat Hidayat, M.Si., IPM., dan Wakil Dekan Prof. Dr. Ir. Heni Indrijani, SPt., M.Si., IPU,. Ucapan ter…\n=== HALAMAN 6 (dugaan: kata pengantar) ===\nL43: juga penulis sampaikan kepada kedua orang tua tersayang, yakni Ibu Nurul Hikmah dan Ayah Zaenal Bastari atas dukungan dan doa selama penulis menyusun skripsi ini. Terima kasih juga penulis ucapankan kepada rekan-rekan sa…\nL44: Akhir kata semoga skripsi ini dapat bermanfaat bagi semua pihak. Semoga amal dan segala kebaikan yang telah diberikan semua pihak mendapat balasan pahala dari Allah SWT. Aamiin Ya Rabbal Alamin.\nL45: Sumedang, 22 September 2026\nL46: Penulis\n=== HALAMAN 7 (dugaan: abstrak) ===\nL47: PENGARUH IMBANGAN FESES DOMBA DAN SISA PAKAN SEBAGAI MEDIA PERTUMBUHAN MAGGOT TERHADAP PENYUSUTAN SUBSTRAT DAN PRODUKSI MAGGOT\nL48: Muhammad Omar Bastari\nL49: ABSTRAK\nL50: Penelitian ini bertujuan menganalisis pengaruh berbagai imbangan campuran feses domba dan sisa pakan terhadap tingkat penyusutan substrat serta biomassa maggot (Black Soldier Fly), sekaligus menentukan rasio paling optim…\nL51: .\nL52: Kata Kunci: Maggot BSF, Feses Domba, Sisa Pakan, Biokonversi, Biomassa\n=== HALAMAN 8 (dugaan: abstract) ===\nL53: THE EFFECT OF SHEEP FECES AND FEED RESIDUES AS MAGGOT GROWTH MEDIA ON SUBSTRATE SHRINKATION AND MAGGOT PRODUCTION\nL54: Muhammad Omar Bastari\nL55: ABSTRACT\nL56: This study aims to analyze the effect of various ratios of sheep feces and feed residues on substrate shrinkage and Black Soldier Fly maggot biomass, as well as to determine the optimal ratio. A Complete Randomized Desig…\nL57: Keywords: BSF Maggots, Sheep Manure, Feed Residues, Bioconversion, Biomass."
+}

@@ -60,6 +60,8 @@ import { blackenLinks } from "./link-color";
 import { clearFloatingSignatures, fitCoverPages, fitStatementPage } from "./cover-fit";
 import { inlineFloatingImages } from "./float-inline";
 import { boxStatementPages, findFrameTables, removeFrameShapes, STATEMENT_BOX_EXTRA, statementRanges, unwrapStatementFrames } from "./statement";
+import { buildFrontMatter, type FrontAI, type FrontReport } from "../front";
+import type { FrontFieldInput } from "../front/types";
 
 export type TransformResult = {
     buffer: Buffer;
@@ -83,6 +85,10 @@ export type TransformResult = {
     coverRemoved: { tables: number; rows: number; cells: number };
     /** Bila teks gagal diverifikasi: baris tersisa (asli vs hasil) yang tidak dilaporkan modul mana pun. */
     unexplained: { a: string[]; b: string[] } | null;
+    /** Template bagian depan: data yang dipakai, sumbernya, dan baris yang tidak terpakai (untuk form konfirmasi). */
+    front: FrontReport;
+    /** Perubahan jumlah tabel/baris/sel/gambar yang SENGAJA dibuat formatter (bagian depan template, tanda tangan, bingkai). */
+    intended: { tables: number; rows: number; cells: number; drawings: number };
 };
 
 export type TransformOptions = {
@@ -90,6 +96,10 @@ export type TransformOptions = {
     coverAI?: CoverAI;
     /** Uji regresi: dipanggil di tiap tahap dengan isi document.xml saat itu. */
     trace?: (stage: string, xml: string) => void;
+    /** Isian data bagian depan dari pengguna (form konfirmasi), menimpa hasil pembacaan naskah. */
+    frontFields?: FrontFieldInput;
+    /** AI penunjuk baris data bagian depan (opsional; tanpa ini dibaca dengan aturan). */
+    frontAI?: FrontAI;
 };
 
 type SectionRef = { where: "para"; node: ParaNode } | { where: "body" };
@@ -183,8 +193,9 @@ function collectSections(
     return out;
 }
 
-function planNumbering(sections: SectionInfo[], rules: FormatRules) {
-    let romanStarted = false;
+/** `romanAlreadyStarted`: bagian depan dari template sudah memulai nomor romawi di Kata Pengantar. */
+function planNumbering(sections: SectionInfo[], rules: FormatRules, romanAlreadyStarted = false) {
+    let romanStarted = romanAlreadyStarted;
     let arabicStarted = false;
     return sections.map((s) => {
         if (s.coverOnly || s.quiet) return { fmt: rules.numbering("cover"), start: 1 as number | null, cover: true, hideFirst: false };
@@ -248,6 +259,9 @@ export async function transformDocx(
     // Judul bab → satu paragraf dua baris, sebelum outline.
     const preNodes = flatten(model.body);
     const aiOf = new Map<ParaNode | TableNode, Role | null>(preNodes.map((n, i) => [n, opts.aiRoles?.[i] ?? null]));
+    // Bagian depan (sampul s.d. abstract) dari template preset. Hasilnya satu blok XML di awal body
+    // yang tidak dilihat modul lain, jadi tata letaknya tidak diubah lagi.
+    const front = await buildFrontMatter(zip, model, config, opts.frontFields ?? {}, opts.frontAI);
     const chapters = unifyChapterHeadings(model);
     // Gambar + keterangannya dalam satu paragraf → dua paragraf (keterangannya jadi dikenali).
     const figSplit = splitFigureCaptions(model);
@@ -269,7 +283,7 @@ export async function transformDocx(
     const aiRoles = nodes.map((n) => aiOf.get(n) ?? null);
     const outline = buildOutline(nodes, aiRoles, chapters.chapterIds);
     const trace = (stage: string) => { if (opts.trace) opts.trace(stage, serializeDocument(model)); };
-    trace("01 judul bab + gambar dipisah");
+    trace("01 bagian depan, judul bab, gambar dipisah");
     const promoted = promoteUnnumberedCaptions(nodes, outline);
     const halfPts = Math.round(config.fontSize * 2);
     const bodyLine = Math.round(config.lineSpacing * 240);
@@ -288,7 +302,8 @@ export async function transformDocx(
         if (/^(sumber|source)\s*:/i.test(s.text.trim()) && s.text.length <= 300) tableNotes.set(s.id, "plain");
     });
     const rules = createThesisRules(config);
-    const notes: string[] = [];
+    const notes: string[] = [...front.notes];
+    if (!front.built && front.reason) notes.push(`Template bagian depan tidak dipakai: ${front.reason} Bagian depan dirapikan dengan cara lama — periksa sampul s.d. abstrak secara manual.`);
     if (chapters.merged || chapters.split) notes.push(`${chapters.merged + chapters.split} judul bab diseragamkan menjadi satu judul dua baris (nomor bab di atas, judul bab di bawah).`);
     if (headNums.count) notes.push(`${headNums.count} nomor subbab otomatis Word (mis. "1.1") diubah menjadi nomor ketikan agar tidak terbaca sebagai daftar bernomor.`);
     if (figSplit) notes.push(`${figSplit} gambar yang keterangannya menyatu dalam satu paragraf dipisah: gambar di atas, keterangan di bawahnya (masuk daftar gambar/ilustrasi).`);
@@ -477,6 +492,7 @@ export async function transformDocx(
             bodyLine,
             upper: config.chapterUppercase,
             exact: config.lineRule === "exact",
+            frontRows: front.tocRows,
         })
         : null;
     const toc: TocReport = tocFields ?? columns!.report;
@@ -565,7 +581,7 @@ export async function transformDocx(
 
     const sections = collectSections(model.body, zoneOfNode, roleOfNode, prefaceNode);
     if (sections.some((s) => s.quiet)) notes.push("Halaman sebelum Kata Pengantar (persetujuan, pengesahan, pernyataan, dll.) tidak menampilkan nomor halaman; nomor Romawi dimulai dari i di Kata Pengantar.");
-    const numbering = planNumbering(sections, rules);
+    const numbering = planNumbering(sections, rules, front.romanStarted);
     const sectXml = (s: SectionInfo) => s.ref.where === "para"
         ? /<w:sectPr[\s\S]*?<\/w:sectPr>/.exec(s.ref.node.xml)?.[0] ?? null
         : model.bodySectPr;
@@ -647,22 +663,29 @@ export async function transformDocx(
 
     const coverPage = rules.page("cover");
     const coverHeight = coverPage.heightTwips - coverPage.margin.top - coverPage.margin.bottom;
-    const tpl = await buildCoverFromTemplate(model, nodes, outline, {
-        style: rules.cover(),
-        font: config.fontFamily,
-        width: usableWidth,
-        height: coverHeight,
-        docTypeFallback: config.docType,
-        ai: opts.coverAI,
-    });
-    const cover = tpl.built
-        ? { pages: 1, reordered: false, coverLines: 0 }
-        : layoutCover(model, nodes, outline, { height: coverHeight, width: usableWidth, style: rules.cover() });
-    const logos = tpl.built
+    // Template bagian depan sudah menyusun sampul: penyusun sampul lama tidak dijalankan.
+    const tpl = front.built
+        ? { built: false, source: null, reason: null, fields: {}, regions: [] as VerifyRegion[], removed: { tables: 0, rows: 0, cells: 0 } }
+        : await buildCoverFromTemplate(model, nodes, outline, {
+            style: rules.cover(),
+            font: config.fontFamily,
+            width: usableWidth,
+            height: coverHeight,
+            docTypeFallback: config.docType,
+            ai: opts.coverAI,
+        });
+    const cover = front.built
+        ? { pages: 0, reordered: false, coverLines: 0 }
+        : tpl.built
+            ? { pages: 1, reordered: false, coverLines: 0 }
+            : layoutCover(model, nodes, outline, { height: coverHeight, width: usableWidth, style: rules.cover() });
+    const logos = front.built || tpl.built
         ? { centered: 0, regions: [] as VerifyRegion[] }
         : centerCoverImages(nodes, outline);
 
-    if (tpl.built) {
+    if (front.built) {
+        // Catatan bagian depan sudah dari template.
+    } else if (tpl.built) {
         notes.push(`Halaman sampul disusun ulang dari template (data sampul dibaca ${tpl.source === "ai" ? "dengan bantuan AI dan dicocokkan dengan teks asli" : "dengan aturan"}): judul di atas; jenis dokumen, identitas, pembimbing, dan logo di tengah; identitas institusi di bawah.`);
         const dt = (tpl.fields.docType ?? "").toLowerCase();
         const chosen = String(config.docType);
@@ -729,45 +752,6 @@ export async function transformDocx(
     await enableUpdateFields(zip);
     await patchCompat(zip);
 
-    const after = fingerprint(newXml);
-    const verifyOpts: VerifyOptions = {
-        unorderedPrefix: cover.reordered ? cover.coverLines : 0,
-        regions: [
-            ...headings.regions,
-            ...tableCaps.regions, ...figureCaps.regions,
-            ...signatures.regions,
-            ...listCache.regions,
-            ...logos.regions,
-            ...listRep.regions,
-            ...flow.regions, ...keywords.regions, ...refs.regions,
-            ...demoted.regions,
-            ...chapters.regions,
-            ...minorRegions,
-            ...romanChapters.regions,
-            ...headNums.regions,
-            ...(columns?.regions ?? []),
-            ...labels.regions,
-            ...tpl.regions,
-        ],
-        added: {
-            ...signatures.added,
-            tables: signatures.added.tables - tpl.removed.tables - (unwrapped?.tables ?? 0),
-            rows: signatures.added.rows - tpl.removed.rows - (unwrapped?.rows ?? 0),
-            cells: signatures.added.cells - tpl.removed.cells - (unwrapped?.cells ?? 0),
-        },
-    };
-    const issues = verify(before, after, verifyOpts);
-    const unexplained = issues.some((i) => i.level === "error" && /^Teks dokumen berubah sekitar/.test(i.message))
-        ? residualLines(before, after, verifyOpts) : null;
-
-    const preview = nodes.slice(0, 300).map((n, i) => ({
-        role: outline.items[i]?.role ?? "body",
-        zone: outline.items[i]?.zone ?? "main",
-        text: n.kind === "table"
-            ? `[Tabel ${n.rows.length} baris × ${n.rows[0]?.cells.length ?? 0} kolom]`
-            : n.hasDrawing && !n.text.trim() ? "[Gambar]" : n.text.replace(/\t/g, " ").slice(0, 280),
-    }));
-
     await patchHeadingStyles(zip);
 
     // Ukuran halaman diukur dengan style FINAL.
@@ -786,7 +770,55 @@ export async function transformDocx(
     // Paling akhir: isi lembar pernyataan yang sudah rapi dibungkus kotak setinggi isinya.
     const boxed = boxMode ? boxStatementPages(model, pageInfo, { width: usableWidth }) : 0;
     if (boxed) notes.push("Isi lembar pernyataan dibingkai kotak setinggi isinya (garis bawah tepat di bawah nama penulis).");
-    if (coverFit.scaled || sigGap || stFit.tightened || boxed) zip.file("word/document.xml", serializeDocument(model));
+
+    /* -------- verifikasi: dokumen FINAL (sesudah semua tahap) dibanding asli -------- */
+
+    const finalXml = serializeDocument(model);
+    zip.file("word/document.xml", finalXml);
+    const after = fingerprint(finalXml);
+
+    const verifyOpts: VerifyOptions = {
+        unorderedPrefix: cover.reordered ? cover.coverLines : 0,
+        regions: [
+            ...headings.regions,
+            ...tableCaps.regions, ...figureCaps.regions,
+            ...signatures.regions,
+            ...listCache.regions,
+            ...logos.regions,
+            ...listRep.regions,
+            ...flow.regions, ...keywords.regions, ...refs.regions,
+            ...demoted.regions,
+            ...chapters.regions,
+            ...minorRegions,
+            ...romanChapters.regions,
+            ...headNums.regions,
+            ...(columns?.regions ?? []),
+            ...labels.regions,
+            ...tpl.regions,
+            ...front.regions,
+        ],
+        // Tabel/gambar yang sengaja ditambah (+) atau dibuang (−): tanda tangan, sampul lama, bingkai
+        // pernyataan (dibuka / dibungkus kotak), dan bagian depan dari template.
+        added: {
+            tables: signatures.added.tables - tpl.removed.tables - (unwrapped?.tables ?? 0) + boxed + front.delta.tables,
+            rows: signatures.added.rows - tpl.removed.rows - (unwrapped?.rows ?? 0) + boxed + front.delta.rows,
+            cells: signatures.added.cells - tpl.removed.cells - (unwrapped?.cells ?? 0) + boxed + front.delta.cells,
+            drawings: front.delta.drawings,
+        },
+        removedImageIds: front.removedImageIds,
+    };
+    const issues = [...front.issues, ...verify(before, after, verifyOpts)];
+    const unexplained = issues.some((i) => i.level === "error" && /^Teks dokumen berubah sekitar/.test(i.message))
+        ? residualLines(before, after, verifyOpts) : null;
+
+
+    const preview = [...front.preview, ...nodes.slice(0, 300).map((n, i) => ({
+        role: outline.items[i]?.role ?? "body",
+        zone: outline.items[i]?.zone ?? "main",
+        text: n.kind === "table"
+            ? `[Tabel ${n.rows.length} baris × ${n.rows[0]?.cells.length ?? 0} kolom]`
+            : n.hasDrawing && !n.text.trim() ? "[Gambar]" : n.text.replace(/\t/g, " ").slice(0, 280),
+    }))];
 
     const buffer = await zip.generateAsync({
         type: "nodebuffer",
@@ -816,5 +848,10 @@ export async function transformDocx(
         headings,
         coverRemoved: tpl.removed,
         unexplained,
+        intended: { ...verifyOpts.added!, drawings: verifyOpts.added!.drawings ?? 0 },
+        front: {
+            built: front.built, reason: front.reason, found: front.found, missing: front.missing,
+            fields: front.fields, sources: front.sources, unmapped: front.unmapped,
+        },
     };
 }

@@ -113,18 +113,28 @@ function describeSections(xml: string): string[] {
 /* ------------------------------------------------------------------ */
 
 function xmlProblem(xml: string): string | null {
-    const stack: string[] = [];
+    const stack: { tag: string; ns: Set<string> }[] = [];
     const re = /<!\[CDATA\[[\s\S]*?\]\]>|<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<(\/?)([A-Za-z_][\w.:-]*)((?:\s+[^\s=>]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*(\/?)>/g;
+    // Prefix namespace harus dideklarasikan di elemen itu sendiri atau leluhurnya (Word menolak file bila tidak).
+    const declared = (attrs: string) => new Set([...attrs.matchAll(/\sxmlns:([\w.-]+)\s*=/g)].map((x) => x[1]));
+    const inScope = (p: string, own: Set<string>) => p === "xml" || own.has(p) || stack.some((s) => s.ns.has(p));
     let m: RegExpExecArray | null;
     while ((m = re.exec(xml))) {
         if (!m[2]) continue;
+        if (!m[1]) {
+            const own = declared(m[3] ?? "");
+            const prefixes = [m[2], ...[...(m[3] ?? "").matchAll(/\s([\w.-]+):[\w.-]+\s*=/g)].map((x) => `${x[1]}:`)]
+                .map((n) => (n.includes(":") ? n.split(":")[0] : "")).filter((p) => p && p !== "xmlns");
+            const bad = prefixes.find((p) => !inScope(p, own));
+            if (bad) return `prefix namespace "${bad}:" tidak dideklarasikan pada <${m[2]}> (karakter ${m.index})`;
+            if (!m[4]) stack.push({ tag: m[2], ns: own });
+            continue;
+        }
         if (m[4]) continue;
-        if (m[1]) {
-            const top = stack.pop();
-            if (top !== m[2]) return `</${m[2]}> tidak cocok dengan <${top ?? "?"}> (karakter ${m.index})`;
-        } else stack.push(m[2]);
+        const top = stack.pop();
+        if (top?.tag !== m[2]) return `</${m[2]}> tidak cocok dengan <${top?.tag ?? "?"}> (karakter ${m.index})`;
     }
-    if (stack.length) return `<${stack[stack.length - 1]}> tidak ditutup`;
+    if (stack.length) return `<${stack[stack.length - 1].tag}> tidak ditutup`;
     const amp = /&(?!(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);)/.exec(xml);
     if (amp) return `karakter & tanpa escape (karakter ${amp.index})`;
     return null;

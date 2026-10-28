@@ -20,6 +20,7 @@
  *  - judul/nama tidak ditemukan → tidak disusun ulang (kembali ke tata letak lama).
  */
 import { escapeXml } from "./xml";
+import { inlineOf } from "./figure-split";
 import { flatten, parseBlocks, type DocModel, type ParaNode, type TableNode } from "./document-model";
 import type { Outline } from "../structure/outline";
 import type { FormatRules } from "../rules/format-rules";
@@ -599,20 +600,8 @@ function layoutBlocks(lines: string[], m: Merged, docType: string, dropped: Set<
 /* ------------------------------------------------------------------ */
 
 function normalizeLogo(run: string, maxTw: number, minTw = 0): { xml: string; heightTw: number; widthTw: number } {
-  let r = run;
-  const anchor = /<wp:anchor\b[\s\S]*?<\/wp:anchor>/.exec(r)?.[0];
-  if (anchor) {
-    const pick = (re: RegExp) => re.exec(anchor)?.[0] ?? "";
-    const extent = pick(/<wp:extent\b[^>]*\/>/);
-    const graphic = pick(/<a:graphic\b[\s\S]*?<\/a:graphic>/);
-    if (extent && graphic) {
-      r = r.replace(anchor, `<wp:inline distT="0" distB="0" distL="0" distR="0">${extent}` +
-        pick(/<wp:effectExtent\b[^>]*\/>/) +
-        pick(/<wp:docPr\b[^>]*\/>|<wp:docPr\b[^>]*>[\s\S]*?<\/wp:docPr>/) +
-        pick(/<wp:cNvGraphicFramePr\s*\/>|<wp:cNvGraphicFramePr>[\s\S]*?<\/wp:cNvGraphicFramePr>/) +
-        `${graphic}</wp:inline>`);
-    }
-  }
+  // Logo melayang → inline (deklarasi namespace di elemen anchor ikut dibawa).
+  let r = inlineOf(run);
   const ext = /<wp:extent\s+cx="(\d+)"\s+cy="(\d+)"/.exec(r);
   if (!ext) return { xml: r, heightTw: 2000, widthTw: 2000 };
   let cx = Number(ext[1]);

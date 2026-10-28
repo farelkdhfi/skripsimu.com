@@ -50,7 +50,10 @@ export function inlineOf(run: string): string {
         const extent = pick(/<wp:extent\b[^>]*\/>/);
         const graphic = pick(/<a:graphic\b[\s\S]*?<\/a:graphic>/);
         if (!extent || !graphic) return anchor;
-        return `<wp:inline distT="0" distB="0" distL="0" distR="0">${extent}` +
+        // Deklarasi namespace yang ditulis di elemen anchor (bukan di root dokumen) ikut dibawa,
+        // kalau tidak elemen di dalamnya (a:graphic, pic:pic) kehilangan prefix-nya → file rusak.
+        const ns = (/^<wp:anchor\b[^>]*>/.exec(anchor)?.[0].match(/\sxmlns:[\w-]+="[^"]*"/g) ?? []).join("");
+        return `<wp:inline distT="0" distB="0" distL="0" distR="0"${ns}>${extent}` +
             pick(/<wp:effectExtent\b[^>]*\/>/) +
             pick(/<wp:docPr\b[^>]*\/>|<wp:docPr\b[^>]*>[\s\S]*?<\/wp:docPr>/) +
             pick(/<wp:cNvGraphicFramePr\s*\/>|<wp:cNvGraphicFramePr>[\s\S]*?<\/wp:cNvGraphicFramePr>/) +

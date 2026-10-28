@@ -71,12 +71,14 @@ export type VerifyRegion = { beforeLines: string[]; afterLines: string[]; before
  * @param unorderedPrefix baris sampul yang boleh berubah urutan.
  * @param regions blok yang disusun ulang modul (tanda tangan, keterangan, judul, daftar):
  *   barisnya dikeluarkan dari perbandingan urut; kata-katanya dibandingkan sebagai kumpulan.
- * @param added tabel/baris/sel yang SENGAJA ditambahkan formatter.
+ * @param added tabel/baris/sel/gambar yang SENGAJA ditambahkan (positif) atau dibuang (negatif) formatter.
+ * @param removedImageIds gambar tertanam yang SENGAJA tidak dipakai lagi (mis. bingkai/hiasan sampul).
  */
 export type VerifyOptions = {
   unorderedPrefix?: number;
   regions?: VerifyRegion[];
-  added?: { tables: number; rows: number; cells: number };
+  added?: { tables: number; rows: number; cells: number; drawings?: number };
+  removedImageIds?: string[];
 };
 
 /** Kunci pencocokan baris: huruf besar-kecil & spasi tidak dihitung (judul bisa dikapitalkan tahap berikutnya). */
@@ -117,10 +119,20 @@ function removeGroup(lines: string[], targets: string[]): string[] {
     if (score > best) { best = score; start = s; }
   }
 
+  // Baris blok dicari MAJU dari baris blok sebelumnya (blok = baris berurutan). Teks yang sama bisa
+  // ada di tempat lain (entri Daftar Isi "1.1 Latar Belakang" = judul subbabnya); kalau kemunculan
+  // di dalam blok sudah diambil blok lain, kemunculan terdekat di luar dipakai TANPA memindahkan
+  // posisi blok — supaya baris berikutnya tetap diambil dari blok ini, bukan dari isi bab.
+  const WINDOW = 8;
   let cursor = start === -1 ? 0 : start;
   for (const w of want) {
-    const k = nearest(keys, w, cursor, gone);
-    if (k !== -1) { gone.add(k); cursor = k; }
+    let k = -1;
+    for (let f = cursor; f < keys.length && f <= cursor + WINDOW; f++) {
+      if (!gone.has(f) && keys[f] === w) { k = f; break; }
+    }
+    if (k !== -1) { gone.add(k); cursor = k; continue; }
+    const far = nearest(keys, w, cursor, gone);
+    if (far !== -1) gone.add(far);
   }
   return lines.filter((_, i) => !gone.has(i));
 }
@@ -132,10 +144,12 @@ function removeGroup(lines: string[], targets: string[]): string[] {
 export function residualLines(before: DocFingerprint, after: DocFingerprint, opts: VerifyOptions = {}): { a: string[]; b: string[] } {
   let a = before.text.split("\n");
   let b = after.text.split("\n");
-  for (const r of opts.regions ?? []) {
-    a = removeGroup(a, r.beforeLines);
-    b = removeGroup(b, r.afterLines);
-  }
+  // Blok besar dulu: blok panjang (mis. Daftar Isi) paling pasti posisinya. Blok satu baris (judul
+  // bab yang diseragamkan) yang diproses lebih dulu bisa "mengambil" baris kembarnya di Daftar Isi,
+  // lalu blok Daftar Isi terpaksa mengambil baris dari isi bab.
+  const regions = opts.regions ?? [];
+  for (const r of [...regions].sort((x, y) => y.beforeLines.length - x.beforeLines.length)) a = removeGroup(a, r.beforeLines);
+  for (const r of [...regions].sort((x, y) => y.afterLines.length - x.afterLines.length)) b = removeGroup(b, r.afterLines);
   const k = opts.unorderedPrefix ?? 0;
   const prep = (lines: string[]) => {
     const low = lines.map((l) => l.toLowerCase().replace(/\s+/g, " ").trim()).filter(Boolean);
@@ -190,10 +204,18 @@ export function verify(before: DocFingerprint, after: DocFingerprint, opts: Veri
   const issues: VerifyIssue[] = [];
   const add = opts.added ?? { tables: 0, rows: 0, cells: 0 };
 
-  if (after.drawings < before.drawings)
-    issues.push({ level: "error", message: `${before.drawings - after.drawings} gambar/objek hilang dari dokumen hasil.` });
+  const expectedDrawings = before.drawings + (add.drawings ?? 0);
+  if (after.drawings < expectedDrawings)
+    issues.push({ level: "error", message: `${expectedDrawings - after.drawings} gambar/objek hilang dari dokumen hasil.` });
 
-  const lost = before.embeddedImageIds.filter((id) => !after.embeddedImageIds.includes(id));
+  const allowed = [...(opts.removedImageIds ?? [])];
+  const lost = before.embeddedImageIds.filter((id) => {
+    if (after.embeddedImageIds.includes(id)) return false;
+    const k = allowed.indexOf(id);
+    if (k === -1) return true;
+    allowed.splice(k, 1);
+    return false;
+  });
   if (lost.length)
     issues.push({ level: "error", message: `${lost.length} referensi gambar tertanam tidak ditemukan lagi di dokumen hasil.` });
 

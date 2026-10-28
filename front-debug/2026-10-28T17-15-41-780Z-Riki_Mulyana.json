@@ -1,0 +1,113 @@
+{
+  "versi": "2026-10-29.1",
+  "preset": "unpad-fapet",
+  "nama": "Riki Mulyana",
+  "isian": {
+    "judul": "Pengaruh Kulit Buah Nanas (Ananas comosus) Dalam Ransum Terhadap Laktil-CoA, Akril-CoA dan Propionil-CoA Cairan Rumen: In vitro.",
+    "judulInggris": "The Effect of Pineapple (Ananas comosus) Peels in Rations on Lactyl-CoA, Acryl-CoA, and Propionyl-CoA of Rumen Fluid: In vitro.",
+    "nama": "Riki Mulyana",
+    "npm": "200110220087",
+    "tahun": "2026",
+    "pembimbingUtama": "Dr. Ir. Andi Mushawwir, S.Pt., MP., IPM.",
+    "pembimbingAnggota": "Novi Mayasari, S.Pt., M.Sc., Ph.D.",
+    "ketuaSidang": "Dr. Eka Wulandari, S.Si., M.Si",
+    "dekan": "Prof. Dr. Ir. Rahmat Hidayat, S.Pt., M.Si., IPM",
+    "tanggalSidang": "30 Juni 2026",
+    "tempatTanggalPernyataan": "Jatinangor, Juni 2026",
+    "tempatTanggalKataPengantar": "Sumedang, 8 Juni 2026"
+  },
+  "sumber": {
+    "judul": "aturan",
+    "judulInggris": "aturan",
+    "nama": "ai",
+    "npm": "ai",
+    "tahun": "ai",
+    "pembimbingUtama": "ai",
+    "pembimbingAnggota": "ai",
+    "ketuaSidang": "ai",
+    "dekan": "ai",
+    "tanggalSidang": "ai",
+    "tempatTanggalPernyataan": "ai",
+    "tempatTanggalKataPengantar": "ai"
+  },
+  "kosong": [],
+  "ditolakAI": [
+    "judul (judul & judul Inggris menunjuk baris yang sama)",
+    "judulInggris (judul & judul Inggris menunjuk baris yang sama)",
+    "tanda tangan pembimbingUtama"
+  ],
+  "perbedaan": [],
+  "catatan": [],
+  "masalah": [],
+  "tidakTerbaca": [],
+  "jawabanAI": {
+    "judul": [
+      1,
+      2
+    ],
+    "judulInggris": [
+      2
+    ],
+    "nama": {
+      "baris": 4,
+      "teks": "Riki Mulyana"
+    },
+    "npm": {
+      "baris": 15,
+      "teks": "200110220087"
+    },
+    "tahun": {
+      "baris": 9,
+      "teks": "2026"
+    },
+    "pembimbingUtama": {
+      "baris": 35,
+      "teks": "Dr. Ir. Andi Mushawwir, S.Pt., MP., IPM."
+    },
+    "pembimbingAnggota": {
+      "baris": 37,
+      "teks": "Novi Mayasari, S.Pt., M.Sc., Ph.D."
+    },
+    "ketuaSidang": {
+      "baris": 40,
+      "teks": "Dr. Eka Wulandari, S.Si., M.Si"
+    },
+    "dekan": {
+      "baris": 42,
+      "teks": "Prof. Dr. Ir. Rahmat Hidayat, S.Pt., M.Si., IPM"
+    },
+    "tanggalSidang": {
+      "baris": 44,
+      "teks": "30 Juni 2026"
+    },
+    "tempatTanggalPernyataan": {
+      "baris": 28,
+      "teks": "Jatinangor, Juni 2026"
+    },
+    "tempatTanggalKataPengantar": {
+      "baris": 51,
+      "teks": "Sumedang, 8 Juni 2026"
+    },
+    "kataPengantar": {
+      "dari": 45,
+      "sampai": 50
+    },
+    "abstrak": {
+      "dari": 55,
+      "sampai": 56
+    },
+    "kataKunci": 57,
+    "abstract": {
+      "dari": 60,
+      "sampai": 61
+    },
+    "keywords": 62,
+    "ttdPembimbingUtama": "G6",
+    "ttdPembimbingAnggota": null,
+    "ttdKetuaSidang": null,
+    "ttdDekan": null,
+    "ttdPernyataan": null,
+    "ttdKataPengantar": null
+  },
+  "daftarBaris": "=== HALAMAN 1 (dugaan: sampul muka) ===\nL1: Pengaruh Kulit Buah Nanas (Ananas comosus) Dalam Ransum Terhadap Laktil-CoA, Akril-CoA dan Propionil-CoA Cairan Rumen: In vitro.\nL2: The Effect of Pineapple (Ananas comosus) Peels in Rations on Lactyl-CoA, Acryl-CoA, and Propionyl-CoA of Rumen Fluid: In vitro.\nL3: SKRIPSI\nL4: Riki Mulyana\nG1: [gambar 4.6×4.5 cm]\nL5: Program Studi Sarjana Peternakan\nL6: Fakultas Peternakan\nL7: Universitas Padjadjaran\nL8: Jatinangor\nL9: 2026\n=== HALAMAN 2 (dugaan: sampul kedua) ===\nL10: Pengaruh Kulit Buah Nanas (Ananas comosus) Dalam Ransum Terhadap Laktil-CoA, Akril-CoA dan Propionil-CoA Cairan Rumen: In vitro.\nL11: The Effect of Pineapple (Ananas comosus) Peels in Rations on Lactyl-CoA, Acryl-CoA, and Propionyl-CoA of Rumen Fluid: In vitro.\nL12: SKRIPSI\nL13: Diajukan untuk memperoleh gelar Sarjana\nL14: Riki Mulyana\nG2: [gambar 4.6×4.5 cm]\nL15: NPM. 200110220087\nL16: Program Studi Sarjana Peternakan\nL17: Fakultas Peternakan\nL18: Universitas Padjadjaran\nL19: Jatinangor\nL20: 2026\n=== HALAMAN 3 (dugaan: lembar pernyataan) ===\nG3: [bentuk/kotak 14.6×21.0 cm]\nL21: LEMBAR PERNYATAAN TIDAK MELAKUKAN PLAGIASI\nL22: Yang bertanda tangan di bawah ini, saya :\nL23: Nama : Riki Mulyana\nL24: NPM : 200110220087\nL25: Judul Skripsi : Pengaruh Kulit Buah Nanas (Ananas comosus) Dalam Ransum Terhadap Laktil-CoA, Akril-CoA dan Propionil-CoA Cairan Rumen: In vitro.\nL26: Menyatakan bahwa tulisan dalam skripsi ini merupakan hasil penelitian penulis, data dan tulisan ini bukan hasil karya orang lain, ditulis dengan kaidah-kaidah dan belum pernah dipublikasikan.\nL27: Demikian pernyataan ini dibuat dengan sebenar-benarnya, tanpa tekanan dari pihak manapun. Penulis bersedia menanggung konsekuensi hukum apabila ditemukan kesalahan dalam pernyataan ini.\nL28: Dibuat di Jatinangor, Juni 2026\nL29: Penulis\nG4: [gambar 2.2×2.2 cm]\nG5: [gambar 3.4×0.8 cm]\nL30: Riki Mulyana\n=== HALAMAN 4 (dugaan: lembar pengesahan) ===\nL31: PENGARUH KULIT BUAH NANAS (Ananas comosus) DALAM RANSUM TERHADAP LAKTIL-COA, AKRIL-COA DAN PROPIONIL-COA CAIRAN RUMEN: IN VITRO\nL32: OLEH :\nL33: RIKI MULYANA\nL34: NPM. 200110220087\nG6: [bentuk/kotak 3.2×1.8 cm]\nL35: Dr. Ir. Andi Mushawwir, S.Pt., MP., IPM.\nL36: Pembimbing Utama\nL37: Novi Mayasari, S.Pt., M.Sc., Ph.D.\nL38: Pembimbing Anggota\nL39: Mengesahkan :\nL40: Dr. Eka Wulandari, S.Si., M.Si\nL41: Ketua Panitia Sidang Skripsi\nL42: Prof. Dr. Ir. Rahmat Hidayat, S.Pt., M.Si., IPM\nL43: Dekan Fakultas Peternakan\nL44: Tanggal Sidang Ujian Sarjana : 30 Juni 2026\n=== HALAMAN 5 (dugaan: kata pengantar) ===\nL45: KATA PENGANTAR\nL46: Puji syukur penulis panjatkan kepada Allah SWT atas karunia, rahmat, dan hidayah-Nya sehingga penulis dapat menyelesaikan penyusunan skripsi yang berjudul “Pengaruh Kulit Buah Nanas (Ananas comosus) Dalam Ransum Terhadap…\nL47: Penyelesaian skripsi yang merupakan salah satu syarat kelulusan di Fakultas Peternakan Universitas Padjadjaran ini tidak terlepas dari bantuan berbagai pihak. Oleh karena itu, penulis menyampaikan ucapan terima kasih dan…\nL48: Rasa terima kasih yang mendalam penulis sampaikan kepada Dr. Ir. Andi Mushawwir, S.Pt., MP., IPM.. selaku pembimbing utama dan kepada Alm. Novi Mayasari, S.Pt., M.Sc., Ph.D. selaku pembimbing anggota, atas arahan dan bim…\nL49: Teristimewa, terima kasih tak terhingga penulis persembahkan kepada kedua orang tua tercinta, Bapak Dedi Mulyadi dan Ibu Teti Kusmalati, serta keluarga atas doa dan dukungan yang tiada henti. Apresiasi juga penulis sampa…\nL50: Penulis menyadari bahwa penulisan dan penyampaian skripsi ini masih terdapat banyak kekurangan dan jauh dari kata sempurna. Penulis mengharapkan kritik dan saran yang membangun dari pembaca untuk kesempurnaan penulisan s…\nL51: Sumedang, 8 Juni 2026\nG7: [gambar 5.9×1.2 cm]\nL52: Penulis\n=== HALAMAN 6 (dugaan: abstrak) ===\nL53: PENGARUH KULIT BUAH NANAS (Ananas comosus) DALAM RANSUM TERHADAP LAKTIL-COA, AKRIL-COA DAN PROPIONIL-COA CAIRAN RUMEN : IN VITRO\nL54: Riki Mulyana\nL55: ABSTRAK\nL56: Produktivitas ternak ruminansia sangat bergantung pada efisiensi fermentasi rumen dalam menghasilkan energi. Penggunaan limbah agroindustri seperti kulit buah nanas (Ananas comosus) menawarkan potensi sebagai pakan fungs…\nL57: Kata Kunci: Akril-CoA, In vitro, Jalur Akrilat, Kulit Nanas, Laktil-CoA, Propionil-CoA.\n=== HALAMAN 7 (dugaan: abstract) ===\nL58: THE EFFECT OF PINEAPPLE (ANANAS COMOSUS) PEELS IN RATIONS ON LACTYL-COA, ACRYL-COA, AND PROPIONYL-COA OF RUMEN FLUID: IN VITRO\nL59: Riki Mulyana\nL60: ABSTRACT\nL61: The productivity of ruminant livestock relies heavily on the efficiency of rumen fermentation in generating energy. The utilization of agro-industrial by-products such as pineapple peel (Ananas comosus) offers potential …\nL62: Keywords: Acryl-CoA, Acrylate Pathway, In vitro, Lactyl-CoA, Pineapple Peel, Propionyl-CoA."
+}
