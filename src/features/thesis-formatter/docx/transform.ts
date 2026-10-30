@@ -46,7 +46,8 @@ import { romanOnlyChapters } from "./chapter-label";
 import { applyExactSpacing } from "./exact-spacing";
 import { materializeHeadingNumbers } from "./heading-numbers";
 import { detachWebDivs, divIndents } from "./web-divs";
-import { alignLegends, alignNoteLegends } from "./legend";
+import { alignLegends, alignNoteLegends, keepLeadIns } from "./legend";
+import { splitEquationSentences } from "./equation-split";
 import { verifyWithFreeze, findAppendixRegion, frozenParagraphs, restoreAppendix, type RestoreReport } from "./appendix-freeze";
 import { allParagraphs, changedHeadingNumbers, displayedLabels, shownHeadings } from "./numbering-sim";
 import { buildColumnLists } from "./column-lists";
@@ -282,6 +283,8 @@ export async function transformDocx(
     const figGroups = normalizeFigureGroups(model);
     // Gambar + keterangannya dalam satu paragraf → dua paragraf (keterangannya jadi dikenali).
     const figSplit = splitFigureCaptions(model);
+    // Rumus + kalimat sesudahnya dalam satu paragraf → dua paragraf (rumus tampil, lalu alinea).
+    const eqSplit = splitEquationSentences(model, frozenParas);
     // Lembar pernyataan di dalam tabel bingkai dikeluarkan dari tabelnya (teks tetap), kecuali preset "keep".
     const unwrapped = config.statementFrame === "keep" ? null : unwrapStatementFrames(model);
     // Gambar isi yang melayang → inline di paragrafnya sendiri (tanda tangan, materai, logo, bentuk tetap melayang).
@@ -318,6 +321,7 @@ export async function transformDocx(
     });
     const rules = createThesisRules(config);
     const notes: string[] = [...front.notes];
+    if (eqSplit.count) notes.push(`${eqSplit.count} paragraf yang berisi rumus lalu langsung kalimat ("Enter" terlupa sesudah rumus) dipisah: rumus tampil di barisnya sendiri, kalimatnya menjadi alinea baru. Teks tidak berubah.`);
     if (!front.built && front.reason) notes.push(`Template bagian depan tidak dipakai: ${front.reason} Bagian depan dirapikan dengan cara lama — periksa sampul s.d. abstrak secara manual.`);
     if (chapters.merged || chapters.split) notes.push(`${chapters.merged + chapters.split} judul bab diseragamkan menjadi satu judul dua baris (nomor bab di atas, judul bab di bawah).`);
     if (headNums.count) notes.push(`${headNums.count} nomor subbab otomatis Word (mis. "1.1") diubah menjadi nomor ketikan agar tidak terbaca sebagai daftar bernomor.`);
@@ -485,6 +489,8 @@ export async function transformDocx(
     });
     if (legends.blocks) notes.push(`${legends.blocks} keterangan rumus (${legends.lines} baris "simbol = arti") disejajarkan: rata margin kiri, tanda "=" satu kolom, baris lanjutan sejajar teks artinya.`);
     if (legends.hypotheses) notes.push(`${legends.hypotheses} baris hipotesis (H0/H1) disejajarkan: teks sesudah titik dua kedua satu kolom.`);
+    const leadIns = keepLeadIns(nodes, outline, legends.ids);
+    if (leadIns) notes.push(`${leadIns} kalimat pengantar berakhiran titik dua ("…, yaitu:", "… sebagai berikut:") ditempelkan ke daftar/tabel/rumus sesudahnya agar tidak tertinggal sendirian di bawah halaman.`);
     if (noteLegends.lines) notes.push(`${noteLegends.lines} baris catatan tabel "simbol = arti" disejajarkan tanda "="-nya.`);
     if (labels.lines) notes.push(`${labels.lines} baris "Label : isi" (identitas, kop surat, singkatan) disejajarkan titik duanya.`);
     const appendixTitles = formatAppendixTitles(nodes, outline, { halfPts, exact: config.lineRule === "exact" });
@@ -847,7 +853,7 @@ export async function transformDocx(
             ...headNums.regions,
             ...(columns?.regions ?? []),
             ...labels.regions,
-            ...legends.regions, ...noteLegends.regions,
+            ...legends.regions, ...noteLegends.regions, ...eqSplit.regions,
             ...tpl.regions,
             ...front.regions,
             ...figGroups.regions,

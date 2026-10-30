@@ -263,6 +263,22 @@ async function hardChecks(zip: JSZip, docXml: string): Promise<string[]> {
             if (body && listed < body) fails.push(`Daftar ${name} memuat ${listed} entri, padahal di isi bab ada ${body} keterangan bernomor`);
         }
     }
+    // 8) Kalimat pengantar "…:" menempel ke daftar / keterangan "simbol = arti" sesudahnya; rumus yang
+    //    diikuti kalimat dalam satu paragraf sudah dipisah (isi bab, sebelum Daftar Pustaka).
+    if (refAt !== -1) {
+        const mainParas = [...docXml.slice(0, refAt).matchAll(/<w:p\b[^>]*>(?:(?!<w:p\b)[\s\S])*?<\/w:p>/g)].map((m) => m[0]);
+        const loose = mainParas.find((p, k) => {
+            const nx = mainParas[k + 1];
+            if (!nx || !/:\s*$/.test(plain(p).trim()) || plain(p).trim().length < 8) return false;
+            const intro = /<w:numId w:val="[1-9]/.test(nx) || /^\S{1,22}\t=\t/.test(plain(nx));
+            return intro && !/<w:keepNext\/>/.test(p) && /<w:sz w:val="24"/.test(p);
+        });
+        if (loose) fails.push(`kalimat pengantar tidak menempel ke daftar sesudahnya: "${plain(loose).slice(0, 40)}"`);
+        const glued = mainParas.find((p) => /^(?:<w:pPr>[\s\S]*?<\/w:pPr>)?(?:<w:bookmark\w+[^>]*\/>)*<m:oMath\b/.test(p.replace(/^<w:p\b[^>]*>/, "")) &&
+            /^[A-Z]\S*\s+\S+\s+\S+/.test(plain(p.slice(p.lastIndexOf("</m:oMath>"))).trim()) &&
+            !/<m:oMath\b/.test(p.slice(p.indexOf("</m:oMath>") + 10)));
+        if (glued) fails.push(`rumus dan kalimat masih dalam satu paragraf: "${plain(glued).slice(0, 40)}"`);
+    }
     // 6) Baris keterangan rumus "simbol ⇥ = arti" tidak ditengahkan seperti rumus.
     const centeredLegend = paras.filter((x) => /<w:jc w:val="center"\/>/.test(/<w:pPr>[\s\S]*?<\/w:pPr>/.exec(x)?.[0] ?? "") &&
         /^\s*\S{1,12}\s*\t\s*=\s*\S/.test(plain(x)) && !/<w:tbl/.test(x));

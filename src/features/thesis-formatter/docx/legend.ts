@@ -285,3 +285,38 @@ export function alignNoteLegends(model: DocModel, tableNotes: TableNotes, noteHa
     flush();
     return out;
 }
+
+/**
+ * Kalimat pengantar berakhiran titik dua ("…, yaitu:", "… sebagai berikut:") menempel ke isi yang
+ * diantarnya (daftar, keterangan "simbol = arti", tabel/keterangan tabel, rumus, gambar): tidak
+ * tertinggal sendirian di bawah halaman. Hanya pengaturan halaman (keepNext).
+ */
+export function keepLeadIns(
+    nodes: (ParaNode | TableNode)[],
+    outline: Outline,
+    legendIds: Set<number>,
+): number {
+    let count = 0;
+    for (let i = 0; i < nodes.length; i++) {
+        const p = nodes[i];
+        const it = outline.items[i];
+        if (p.kind !== "paragraph" || !it || it.zone !== "main" || it.role !== "body") continue;
+        if (!/:\s*$/.test(p.text.trim()) || p.text.trim().length < 8) continue;
+        // Paragraf kosong di antaranya ikut ditempelkan.
+        const gap: ParaNode[] = [];
+        let j = i + 1;
+        while (j < nodes.length && nodes[j].kind === "paragraph" && isEmptyParagraph(nodes[j] as ParaNode) && !(nodes[j] as ParaNode).hasSectPr) { gap.push(nodes[j] as ParaNode); j++; }
+        const n = nodes[j];
+        if (!n) continue;
+        const r = outline.items[j]?.role;
+        const intro = n.kind === "table" || r === "table_caption" || r === "figure" || r === "figure_caption" ||
+            (n.kind === "paragraph" && (n.hasNumbering || legendIds.has(n.id) || isEquation(n) || /<m:oMath\b/.test(n.xml)));
+        if (!intro) continue;
+        for (const q of [p, ...gap]) {
+            if (/<w:keepNext(?:\s+w:val="(?:1|true|on)")?\s*\/>/.test(/<w:pPr>[\s\S]*?<\/w:pPr>/.exec(q.xml)?.[0] ?? "")) continue;
+            q.xml = withProps(q.xml, "w:pPr", { "w:keepNext": "<w:keepNext/>" }, PPR_ORDER);
+            if (q === p) count++;
+        }
+    }
+    return count;
+}
