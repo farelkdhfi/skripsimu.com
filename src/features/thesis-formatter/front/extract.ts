@@ -113,6 +113,10 @@ export type Extraction = {
     replaced: { page: string; from: string; to: string }[];
     /** Data yang tertulis berbeda di halaman lain (mis. NPM di pernyataan ≠ NPM di sampul). */
     conflicts: string[];
+    /** Label jabatan penanda tangan di naskah yang berbeda dari template (dipakai apa adanya). */
+    roleLabels: Partial<Record<"pembimbingUtama" | "pembimbingAnggota" | "ketuaSidang" | "dekan", string>>;
+    /** Label tanggal di lembar pengesahan naskah bila bukan tanggal sidang ("Tanggal Seminar Usulan Penelitian"). */
+    dateLabel: string | null;
     signatures: Partial<Record<"pembimbingUtama" | "pembimbingAnggota" | "ketuaSidang" | "dekan", Pic>>;
     pernyataanPics: Pic[];
     kataPengantar?: ProsaPage & { closingDate: string | null; closingRole: string | null; closingPics: Pic[] };
@@ -312,7 +316,9 @@ function readPengesahan(page: FrontPage, f: FrontFields, x: Extraction) {
         const ri = roleOfPair.get(`${dirOf.get(key)}:${key}`);
         const roleText = ri !== undefined ? bare((items[ri] as LineItem).text) : "";
         if (roleText && !STANDARD_ROLE[key].test(roleText)) {
-            x.conflicts.push(`Jabatan di lembar pengesahan naskah "${roleText}" (${norm(c.text)}) dipasang pada posisi ${ROLE_NAME[key]} di template; label jabatan mengikuti template. Periksa apakah sudah sesuai.`);
+            // Lembar pengesahan mengikuti naskah: jabatan ditulis seperti di naskah, di posisi template.
+            x.roleLabels[key] = roleText.replace(/[,:]\s*$/, "");
+            x.conflicts.push(`Jabatan di lembar pengesahan mengikuti naskah: "${x.roleLabels[key]}" (${norm(c.text)}), di posisi ${ROLE_NAME[key]} template.`);
         }
     }
     for (const l of lines) {
@@ -326,22 +332,92 @@ function readPengesahan(page: FrontPage, f: FrontFields, x: Extraction) {
             // Hanya tanggal SIDANG/UJIAN SARJANA yang mengisi slot template; tanggal seminar usulan
             // (SUP/kolokium) atau pelaksanaan lain bukan tanggal sidang → dikosongkan & dilaporkan.
             if (isSidangDateLabel(d[1])) { if (v && !f.tanggalSidang) f.tanggalSidang = v; }
-            else if (v) x.conflicts.push(`Tanggal di lembar pengesahan naskah ("${norm(l.text).slice(0, 80)}") bukan tanggal sidang/ujian sarjana, jadi tidak dipakai; tanggal sidang di template dikosongkan.`);
+            else if (v && !f.tanggalSidang) {
+                // Tanggal lain (seminar usulan penelitian, kolokium): dipakai dengan labelnya sendiri.
+                f.tanggalSidang = v;
+                x.dateLabel = `Tanggal ${norm(d[1]).trim()}`.replace(/\s+/g, " ").trim();
+                x.conflicts.push(`Tanggal di lembar pengesahan mengikuti naskah: "${x.dateLabel} : ${v}" (bukan tanggal sidang ujian sarjana).`);
+            }
         }
     }
     for (const l of lines) if (!used.has(l)) x.unmapped.push({ page: label, text: l.text });
 
     // Tanda tangan: milik nama penanda tangan TERDEKAT di bawah gambar (tanda tangan selalu di atas
-    // nama), atau nama di paragraf yang sama bila gambar ditambatkan ke baris nama itu sendiri.
+    // nama). Gambar melayang dinilai menurut LETAK TAMPILNYA (paragraf tambatan + jarak atas), bukan
+    // paragraf tambatannya — tanda tangan sering ditambatkan ke judul atau "Menyetujui:" lalu
+    // digeser jauh ke bawah. Gambar sebaris (inline) dinilai menurut urutan paragraf.
     const order = [...signerAt.entries()].sort((a, b) => a[1] - b[1]);
+    const ys = layoutY(items);
+    const nameY = (at: number) => ys.line.get(at) ?? ys.para.get((items[at] as LineItem).para) ?? 0;
+    const visualOwner = (it: PicItem): SignerKey | null => {
+        const a = it.pic.anchor;
+        const base = ys.para.get(it.para);
+        if (!a || base === undefined) return null;
+        const top = a.rel === "paragraph" || a.rel === "line" ? base + a.top : a.rel === "margin" || a.rel === "topMargin" ? a.top : a.rel === "page" ? a.top - 1440 : null;
+        if (top === null) return null;
+        // Tengah gambar dibandingkan dengan baris nama: gambar tanda tangan sering lebih tinggi dari
+        // coretannya (ruang kosong di bawah), jadi tepi bawahnya bisa melewati baris nama.
+        const center = top + it.pic.cy / 635 / 2;
+        let best: [SignerKey, number] | null = null;
+        for (const [k, at] of order) {
+            const d = nameY(at) - center;
+            if (d < -300 || d > 3500) continue;
+            if (!best || d < best[1]) best = [k, d];
+        }
+        return best?.[0] ?? null;
+    };
+    const wide = (p: Pic) => p.cx / Math.max(1, p.cy);
     items.forEach((it, i) => {
         if (!isPic(it)) return;
         if (!it.pic.picture) { x.dropped.push({ pic: it.pic, why: "bentuk/kotak di lembar pengesahan" }); return; }
         const sameLine = order.find(([, at]) => at < i && (items[at] as LineItem).para === it.para);
-        const owner = sameLine ?? order.find(([, at]) => at > i);
-        if (owner && !x.signatures[owner[0]]) x.signatures[owner[0]] = it.pic;
-        else x.dropped.push({ pic: it.pic, why: "tanda tangan di lembar pengesahan yang pemiliknya tidak bisa dipastikan" });
+        const visual = visualOwner(it);
+        // Gambar dari satu grup (dua tanda tangan dalam satu objek): masing-masing ke penanda tangan
+        // berikutnya yang belum bertanda tangan, sesuai urutan tampil di grup.
+        const key = visual ?? (sameLine ?? order.find(([k, at]) => at > i && (!it.pic.fromGroup || !x.signatures[k])))?.[0];
+        const had = key ? x.signatures[key] : undefined;
+        // Dua gambar untuk satu penanda tangan (tanda tangan + cap/stempel bulat): yang lebih
+        // memanjang dipakai sebagai tanda tangan.
+        if (key && (!had || (visual && wide(it.pic) > wide(had) * 1.3))) {
+            if (had) x.dropped.push({ pic: had, why: "cap/stempel di lembar pengesahan (template hanya menyediakan tempat tanda tangan)" });
+            x.signatures[key] = it.pic;
+        } else x.dropped.push({ pic: it.pic, why: key ? "cap/stempel di lembar pengesahan (template hanya menyediakan tempat tanda tangan)" : "tanda tangan di lembar pengesahan yang pemiliknya tidak bisa dipastikan" });
     });
+}
+
+/**
+ * Perkiraan letak tegak (twip dari atas isi halaman) tiap paragraf & baris sebuah halaman:
+ * tinggi baris dari spasi paragraf (exact/auto) dan ukuran hurufnya, ditambah jarak sebelum/sesudah.
+ */
+function layoutY(items: Item[]): { para: Map<ParaNode, number>; line: Map<number, number> } {
+    const para = new Map<ParaNode, number>();
+    const line = new Map<number, number>();
+    const linesIn = new Map<ParaNode, number>();
+    for (const it of items) if (it.k === "line") linesIn.set(it.para, (linesIn.get(it.para) ?? 0) + 1);
+    const metrics = (p: ParaNode) => {
+        const pPr = /<w:pPr>[\s\S]*?<\/w:pPr>/.exec(p.xml)?.[0] ?? "";
+        const sp = /<w:spacing\b[^>]*\/>/.exec(pPr)?.[0] ?? "";
+        const n = (a: string, d: number) => Number(new RegExp(`w:${a}="(-?\\d+)"`).exec(sp)?.[1] ?? d);
+        const sz = Number(/<w:sz w:val="(\d+)"/.exec(p.xml.replace(/<w:pPr>[\s\S]*?<\/w:pPr>/, ""))?.[1] ?? 24);
+        const rule = /w:lineRule="(\w+)"/.exec(sp)?.[1] ?? "auto";
+        const lh = rule === "exact" ? n("line", 240) : rule === "atLeast" ? Math.max(n("line", 240), sz * 11.5) : (n("line", 240) / 240) * sz * 11.5;
+        return { lh, before: n("before", 0), after: n("after", 0) };
+    };
+    let y = 0;
+    let cur: ParaNode | null = null;
+    let k = 0;
+    items.forEach((it, i) => {
+        if (it.k === "break") return;
+        const p = it.para;
+        if (p !== cur) {
+            if (cur) { const m = metrics(cur); y += m.before + Math.max(1, linesIn.get(cur) ?? 0) * m.lh + m.after; }
+            cur = p;
+            k = 0;
+            if (!para.has(p)) para.set(p, y + metrics(p).before);
+        }
+        if (it.k === "line") { line.set(i, para.get(p)! + k * metrics(p).lh); k++; }
+    });
+    return { para, line };
 }
 
 /* ------------------------------------------------------------------ */
@@ -499,7 +575,7 @@ export function extractFront(
 ): Extraction {
     const f = emptyFields();
     const x: Extraction = {
-        fields: f, unmapped: [], replaced: [], conflicts: [], signatures: {}, pernyataanPics: [], dropped: [],
+        fields: f, unmapped: [], replaced: [], conflicts: [], roleLabels: {}, dateLabel: null, signatures: {}, pernyataanPics: [], dropped: [],
     };
     // Sampul kedua lebih lengkap (NPM), jadi dibaca lebih dulu.
     const ordered = [...pages].sort((a, b) => Number(b.kind === "sampulKedua") - Number(a.kind === "sampulKedua"));

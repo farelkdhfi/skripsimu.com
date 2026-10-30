@@ -82,7 +82,36 @@ export async function formatDocxBytes(
   );
 
   const cls = await ai.classify(signals);
-  const result = await transformDocx(input, c, { aiRoles: cls.roles, coverAI: ai.cover, frontFields, frontAI: ai.front });
+  const run = (noFront?: string) => transformDocx(input, c, { aiRoles: cls.roles, coverAI: ai.cover, frontFields, frontAI: ai.front, noFront });
+  // Tangga cadangan — hasil yang berisiko menghilangkan isi tidak pernah diserahkan:
+  //   1. format penuh;  2. tanpa template bagian depan;  3. naskah asli dikembalikan apa adanya.
+  const lossOf = (r: Awaited<ReturnType<typeof run>>) => {
+    const w = r.intended;
+    const fewer = [
+      r.after.tables < r.before.tables + w.tables ? "tabel" : "",
+      r.after.rows < r.before.rows + w.rows ? "baris tabel" : "",
+      r.after.drawings < r.before.drawings + w.drawings ? "gambar/objek" : "",
+      r.after.equations < r.before.equations + (w.equations ?? 0) ? "rumus" : "",
+    ].filter(Boolean);
+    return [...r.loss, ...(fewer.length ? [`Jumlah ${fewer.join(", ")} berkurang.`] : [])];
+  };
+  let result = await run();
+  const fallbackNotes: string[] = [];
+  let loss = lossOf(result);
+  if (loss.length && result.front.built) {
+    const why = `pemeriksaan isi menemukan risiko kehilangan teks saat bagian depan disusun dari template (${loss.join(" ")})`;
+    console.error(`[format] tangga cadangan 2 — tanpa template bagian depan: ${loss.join(" ")}`);
+    const retry = await run(`${why}.`);
+    const loss2 = lossOf(retry);
+    if (!loss2.length) {
+      result = retry;
+      loss = [];
+    } else loss = loss2;
+  }
+  if (loss.length) {
+    console.error(`[format] tangga cadangan 3 — naskah asli dikembalikan: ${loss.join(" ")}`);
+    fallbackNotes.push(`Hasil format DIBATALKAN dan naskah asli dikembalikan tanpa perubahan, karena pemeriksaan isi menemukan risiko teks hilang: ${loss.join(" ")} Mohon kirimkan naskah ini sebagai laporan agar bisa diperbaiki.`);
+  }
 
   const failed = (prefix: string) => result.issues.some((i) => i.message.startsWith(prefix));
   // Jumlah yang diharapkan = asli + perubahan yang SENGAJA dibuat (bagian depan dari template,
@@ -97,11 +126,12 @@ export async function formatDocxBytes(
   ];
 
   const validation: FormatResult["validation"] = [];
+  for (const n of fallbackNotes) validation.push({ level: "error", message: n });
   for (const n of cls.notices) validation.push({ level: "warn", message: n });
   for (const i of result.issues) validation.push({ level: i.level, message: i.message });
   for (const n of result.notes) validation.push({ level: "warn", message: n });
 
-  if (!result.issues.length) {
+  if (!result.issues.length && !fallbackNotes.length) {
     validation.push({
       level: "ok",
       message: result.front.built
@@ -142,7 +172,7 @@ export async function formatDocxBytes(
 
   return {
     fileName: outputName(fileName, c),
-    docxBase64: toBase64(result.buffer),
+    docxBase64: toBase64(fallbackNotes.length ? input : result.buffer),
     source: "docx",
     mode: "preserve",
     preview: result.preview as FormatResult["preview"],

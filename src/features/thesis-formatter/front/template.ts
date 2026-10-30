@@ -630,13 +630,25 @@ export type FillInput = {
     signatures: Partial<Record<"pembimbingUtama" | "pembimbingAnggota" | "ketuaSidang" | "dekan", Pic>>;
     pernyataanPics: Pic[];
     kataPengantarPics: Pic[];
+    /**
+     * Lembar pengesahan mengikuti naskah: label jabatan yang berbeda dari template ("Wakil Dekan I
+     * Fakultas Peternakan") dan label tanggal ("Tanggal Seminar Usulan Penelitian").
+     */
+    labels?: { roles: Partial<Record<"pembimbingUtama" | "pembimbingAnggota" | "ketuaSidang" | "dekan", string>>; date?: string };
 };
+
+/** Isian lembar pengesahan yang DIHAPUS dari tata letak bila tidak ada di naskah (bukan titik-titik). */
+const DROP_IF_MISSING: FrontFieldKey[] = ["pembimbingAnggota", "ketuaSidang", "tanggalSidang"];
 
 export type FillResult = {
     xml: string;
     tocRows: { text: string; bookmark: string }[];
     /** Data yang tidak ada di template (contohnya tidak ditemukan) atau diisi titik-titik. */
     placeholders: FrontFieldKey[];
+    /** Isian yang tidak ada di naskah dan dihapus dari template (bukan titik-titik). */
+    dropped: FrontFieldKey[];
+    /** Teks baku template yang sengaja diganti/dihapus (label jabatan/tanggal mengikuti naskah). */
+    altered: string[];
     /** Tanda tangan/materai naskah yang dipakai & yang tidak mendapat tempat. */
     usedPics: Pic[];
     unusedPics: Pic[];
@@ -687,6 +699,8 @@ export async function fillTemplate(tpl: LoadedTemplate, spec: FrontSpec, input: 
     const warn = (m: string) => { if (!warnings.includes(m)) warnings.push(m); };
     const f = input.fields;
     const placeholders = new Set<FrontFieldKey>();
+    const dropped = new Set<FrontFieldKey>();
+    const altered: string[] = [];
     const usedPics: Pic[] = [];
     const tocRows: FillResult["tocRows"] = [];
     let bm = ctx.maxBookmark + 1;
@@ -816,6 +830,26 @@ export async function fillTemplate(tpl: LoadedTemplate, spec: FrontSpec, input: 
                 }
                 replaceSpan(m, c.s, end, (base) => richRuns(base, value));
             }
+            // Baris tempat & tanggal ("Sumedang, 9 Januari 2026") harus satu baris: bila lebih
+            // panjang dari contoh template sehingga terlipat, indentasi kirinya dikurangi seperlunya
+            // (rata kiri, ujung kanan tetap di margin) — tidak dibiarkan terpotong ke baris berikutnya.
+            if (chosen.some((c) => c.k === "tempatTanggalKataPengantar" || c.k === "tempatTanggalPernyataan")) {
+                const info = pPrInfo(m.pPr);
+                const pgW = Number(/<w:pgSz\b[^>]*w:w="(\d+)"/.exec(page.sectPr)?.[1] ?? 11906);
+                const ml = Number(/<w:pgMar\b[^>]*w:left="(\d+)"/.exec(page.sectPr)?.[1] ?? 1440);
+                const mr = Number(/<w:pgMar\b[^>]*w:right="(\d+)"/.exec(page.sectPr)?.[1] ?? 1440);
+                const full = pgW - ml - mr - info.right;
+                const lines = (left: number) => measureLines(piecesOf(m), full - left);
+                if (info.left > 0 && lines(info.left) > 1 && lines(0) === 1) {
+                    let left = info.left;
+                    while (left > 0 && lines(left) > 1) left = Math.max(0, left - 142);
+                    left = Math.max(0, left - 142);   // cadangan: ukuran huruf Word bisa sedikit lebih lebar dari perkiraan
+                    m.pPr = `<w:pPr>${mergeProps(m.pPr || null, {
+                        "w:ind": `<w:ind w:left="${left}" w:right="${info.right}" w:firstLine="0"/>`,
+                        "w:jc": `<w:jc w:val="left"/>`,
+                    }, PPR_ORDER).join("")}</w:pPr>`;
+                }
+            }
             // Perubahan tinggi paragraf (judul lebih panjang/pendek dari contoh).
             if (topLevel.has(p) && !PROSA.includes(page.kind)) {
                 const info = pPrInfo(m.pPr);
@@ -825,6 +859,69 @@ export async function fillTemplate(tpl: LoadedTemplate, spec: FrontSpec, input: 
                 const width = pgW - ml - mr - info.left - info.right;
                 const d = (measureLines(piecesOf(m), width) - measureLines(before, width)) * lineHeight(m.pPr, halfPts);
                 if (d) delta.set(p, d);
+            }
+        }
+
+        /* --- 3b. lembar pengesahan mengikuti naskah --- */
+        if (page.kind === "pengesahan") {
+            const nextText = (p: ParaNode): ParaNode | null => {
+                for (let i = paras.indexOf(p) + 1; i < paras.length; i++) if (textOfModel(models.get(paras[i])!).trim()) return paras[i];
+                return null;
+            };
+            const blank = (p: ParaNode) => {
+                const m = models.get(p)!;
+                const t = textOfModel(m);
+                if (t.length) replaceSpan(m, 0, t.length, () => []);
+            };
+            const setText = (p: ParaNode, text: string) => {
+                const m = models.get(p)!;
+                const t = textOfModel(m);
+                altered.push(t.trim());
+                replaceSpan(m, 0, t.length, (base) => richRuns(base, [{ t: text, it: false, sub: false, sup: false, b: false }]));
+            };
+            for (const k of SIGNER_KEYS) {
+                const slot = slotParas.get(k);
+                if (!slot) continue;
+                // Penanda tangan yang tidak ada di naskah: nama & jabatannya dihapus (bukan titik-titik).
+                if (placeholders.has(k) && DROP_IF_MISSING.includes(k)) {
+                    const role = nextText(slot);
+                    if (role) { altered.push(textOfModel(models.get(role)!).trim()); blank(role); }
+                    blank(slot);
+                    placeholders.delete(k);
+                    dropped.add(k);
+                    continue;
+                }
+                const label = input.labels?.roles[k];
+                if (label) {
+                    // Baris jabatan = baris berisi sesudah nama (nama yang panjang sudah diberi ganti baris).
+                    const own = textOfModel(models.get(slot)!);
+                    const nl2 = own.indexOf("\n");
+                    if (nl2 !== -1 && own.slice(nl2 + 1).trim()) {
+                        const m = models.get(slot)!;
+                        altered.push(own.slice(nl2 + 1).trim());
+                        replaceSpan(m, nl2 + 1, own.length, (base) => richRuns(base, [{ t: label, it: false, sub: false, sup: false, b: false }]));
+                    } else {
+                        const role = nextText(slot);
+                        if (role) setText(role, label);
+                    }
+                }
+            }
+            const dateP = slotParas.get("tanggalSidang");
+            if (dateP) {
+                if (placeholders.has("tanggalSidang")) {
+                    altered.push(textOfModel(models.get(dateP)!).trim());
+                    blank(dateP);
+                    placeholders.delete("tanggalSidang");
+                    dropped.add("tanggalSidang");
+                } else if (input.labels?.date) {
+                    const m = models.get(dateP)!;
+                    const t = textOfModel(m);
+                    const colon = t.search(/\s*[:\uFF1A]/);
+                    if (colon > 0) {
+                        altered.push(t.slice(0, colon).trim());
+                        replaceSpan(m, 0, colon, (base) => richRuns(base, [{ t: input.labels!.date!, it: false, sub: false, sup: false, b: false }]));
+                    }
+                }
             }
         }
 
@@ -1004,6 +1101,8 @@ export async function fillTemplate(tpl: LoadedTemplate, spec: FrontSpec, input: 
     return {
         xml, tocRows,
         placeholders: [...placeholders],
+        dropped: [...dropped],
+        altered,
         usedPics,
         unusedPics: [...input.pernyataanPics, ...input.kataPengantarPics, ...Object.values(input.signatures)].filter((p): p is Pic => Boolean(p) && !usedPics.includes(p!)),
         warnings,

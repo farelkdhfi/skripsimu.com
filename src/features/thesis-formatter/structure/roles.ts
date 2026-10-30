@@ -243,9 +243,9 @@ export function scanStructure(signals: Signals[]): { zones: Zone[]; inList: bool
     return !s.isTable && !CHAPTER_LABEL_ONLY_RE.test(bareOf(s)) && (LIST_ENTRY_RE.test(raw) || PAGE_NUM_TAIL.test(raw));
   };
   /** Dua paragraf berisi berikutnya. */
-  const ahead = (i: number) => {
+  const ahead = (i: number, n = 2) => {
     const out: number[] = [];
-    for (let k = i + 1; k < signals.length && out.length < 2; k++) {
+    for (let k = i + 1; k < signals.length && out.length < n; k++) {
       if (signals[k].isTable) break;
       if (signals[k].text.trim()) out.push(k);
     }
@@ -272,7 +272,15 @@ export function scanStructure(signals: Signals[]): { zones: Zone[]; inList: bool
         (APPENDIX_HEADING_RE.test(t) && t.length <= 60));
       const chapterish = t.length <= 120 && (Boolean(s.chapterHint) || CHAPTER_RE.test(t));
       const prose = raw.length >= 150 && /[.!?]$/.test(raw) && !raw.includes("\t");
-      if (named || prose || (chapterish && !ahead(i).some(entryAt))) listing = false;
+      // Judul bab di halaman baru (atau berbentuk "I  PENDAHULUAN") yang segera disusul paragraf
+      // isi — bukan entri — adalah awal bab, walau daftar sebelumnya tidak ditutup judul lain
+      // (Daftar Lampiran ketikan lalu BAB I di halaman berikutnya).
+      const next2 = ahead(i);
+      const proseAt = (k: number) => { const r = signals[k].text.trim(); return r.length >= 150 && /[.!?]$/.test(r) && !r.includes("\t"); };
+      const romanChapter = /^[IVX]{1,4}\.?\s+[A-Z][A-Z\s]{3,}$/.test(raw);
+      const opensChapter = t.length <= 120 && headingish(t) && (Boolean(s.pageStart) || i === pageFrom || romanChapter) &&
+        !ahead(i, 3).some(entryAt) && ahead(i, 3).some(proseAt);
+      if (named || prose || opensChapter || (chapterish && !next2.some(entryAt))) listing = false;
     }
 
     // Perpindahan zona hanya dipicu judul sungguhan, bukan barisan daftar isi.

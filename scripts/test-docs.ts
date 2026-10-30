@@ -388,6 +388,7 @@ async function main() {
             const result = await transformDocx(input, config, {
                 ...(TRACE ? { trace: (name: string, xml: string) => stages.push({ name, xml }) } : {}),
                 frontAI,
+                frontAIAlways: Boolean(c.frontAI),
             });
             const outFile = path.join(OUT, `${base}-FORMATTED-${preset}.docx`);
             try {
@@ -404,6 +405,7 @@ async function main() {
             finalXml = await zip.file("word/document.xml")!.async("string");
 
             for (const i of result.issues) if (i.level === "error") fails.push(`Verifikasi: ${i.message}`);
+            for (const l of result.loss) fails.push(`Isi hilang: ${l}`);
             unexplained = result.unexplained;
             fails.push(...await hardChecks(zip, finalXml));
 

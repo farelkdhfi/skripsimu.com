@@ -1,8 +1,86 @@
-   {
-     "DRAFT_SKRIPSI_RIKI_MULYANA_DRAFT_ASLI_WORD_FINAL.docx": { "preset": "unpad-fapet" },
-     "DRAFT SKRIPSI_AINUDZIKRI DRAFT ASLI WORD FINAL.docx": { "preset": "unpad-fapet" },
-     "DRAFT SKRIPSI_ZAM_ZAM DRAFT ASLI WORD FINAL.docx": { "preset": "unpad-fapet" },
-     "DRAFT SKRIPSI_OMAR DRAFT ASLI WORD FINAL.docx": { "preset": "unpad-fapet" },
-     "DRAFT SKRIPSI_MUMTAZ DRAFT ASLI WORD FINAL.docx": { "preset": "unpad-fapet" },
-     "dokumen-tes-skripsi.docx": { "preset": "umum" }
-   }
+{
+  "front-a-riki.docx": {
+    "preset": "unpad-fapet"
+  },
+  "front-b-messy.docx": {
+    "preset": "unpad-fapet"
+  },
+  "front-c-partial.docx": {
+    "preset": "unpad-fapet"
+  },
+  "front-d-usulan.docx": {
+    "preset": "unpad-fapet"
+  },
+  "front-e-motto.docx": {
+    "preset": "unpad-fapet"
+  },
+  "front-f-tabel.docx": {
+    "preset": "unpad-fapet"
+  },
+  "front-a-riki umum": {
+    "preset": "umum"
+  },
+  "lo-front-a-riki.docx": {
+    "preset": "unpad-fapet"
+  },
+  "lo-front-b-messy.docx": {
+    "preset": "unpad-fapet"
+  },
+  "lo-front-f-tabel.docx": {
+    "preset": "unpad-fapet"
+  },
+  "front-g-npm-beda.docx": {
+    "preset": "unpad-fapet"
+  },
+  "front-h-budi.docx": {
+    "preset": "unpad-fapet"
+  },
+  "front-i-pendek.docx": {
+    "preset": "unpad-fapet"
+  },
+  "front-j-variasi.docx": {
+    "preset": "unpad-fapet"
+  },
+  "front-j-variasi-ai.docx": {
+    "preset": "unpad-fapet",
+    "frontAI": "front-j-variasi.ai-salah.json"
+  },
+  "front-k-gilang.docx": {
+    "preset": "unpad-fapet"
+  },
+  "front-k-gilang-ai.docx": {
+    "preset": "unpad-fapet",
+    "frontAI": "front-k-gilang.ai-asli.json"
+  },
+  "front-l-toc-teks.docx": {
+    "preset": "unpad-fapet"
+  },
+  "front-l-toc-field.docx": {
+    "preset": "unpad-fapet"
+  },
+  "front-l-toc-tabel.docx": {
+    "preset": "unpad-fapet"
+  },
+  "front-l-kp-sesudah.docx": {
+    "preset": "unpad-fapet"
+  },
+  "front-m-omar.docx": {
+    "preset": "unpad-fapet"
+  },
+  "front-k-gilang-ai2.docx": {
+    "preset": "unpad-fapet",
+    "frontAI": "front-k-gilang.ai-judul-campur.json"
+  },
+  "body-n-mumtaz.docx": {
+    "preset": "unpad-fapet"
+  },
+  "body-o-riki.docx": {
+    "preset": "unpad-fapet"
+  },
+  "body-p-ainudzikri.docx": {
+    "preset": "unpad-fapet"
+  },
+  "body-q-dina.docx": {
+    "preset": "unpad-fapet"
+  }
+}

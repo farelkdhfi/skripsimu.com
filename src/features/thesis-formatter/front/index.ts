@@ -93,6 +93,9 @@ const empty = (reason: string | null): FrontResult => ({
     delta: { drawings: 0, tables: 0, rows: 0, cells: 0, equations: 0 }, removedImageIds: [], tocRows: [], preview: [],
 });
 
+/** Bagian depan sengaja tidak disusun dari template (tangga cadangan). */
+export const skipFront = (reason: string): FrontResult => empty(reason);
+
 /* ------------------------------------------------------------------ */
 /* Wilayah bagian depan                                                 */
 /* ------------------------------------------------------------------ */
@@ -187,11 +190,51 @@ function findRegion(model: DocModel): Region | string {
         return false;
     };
 
+    /** Isi bab sesudah baris k (sebelum bab berikutnya): ada paragraf kalimat? */
+    const bodyAfter = (k: number) => {
+        let titleLines = 0;
+        let j = k + 1;
+        for (; j < nodes.length; j++) {
+            if (inToc[j]) break;
+            const t = textOf(j);
+            if (!t.trim()) continue;
+            if (otherChapter(j, k, titleLines)) break;
+            // Judul bab asli disusul paling banyak beberapa baris judul/subjudul lalu isi. Baris
+            // bab lain, judul halaman depan, atau entri bernomor halaman = ini baris daftar.
+            const r = outline.items[j]?.role;
+            if (r === "list_heading" || r === "front_heading" || r === "reference_heading" || r === "appendix_heading") break;
+            if (chapterNo(t.trim()) !== null && /^(?:bab\s+)?[ivxl\d]+\.?\s/i.test(t.trim())) break;
+            if (/\S\s*\d{1,3}\s*$/.test(t) && t.trim().length <= 160 && !/[.!?]\s*\d{1,3}\s*$/.test(t)) break;
+            if (++titleLines > 4) break;
+            if (isProse(t) && r !== "list_entry") return { body: true, j };
+        }
+        return { body: false, j };
+    };
+    /** Judul bab yang kuat: berbentuk judul bab (pola bab / Heading 1 / tingkat kerangka 1). */
+    const headingLike = (k: number) => {
+        const n = nodes[k];
+        if (n.kind !== "paragraph") return false;
+        const pPr = /<w:pPr>[\s\S]*?<\/w:pPr>/.exec(n.xml)?.[0] ?? "";
+        let next: string | null = null;
+        for (let j = k + 1; j < nodes.length; j++) if (textOf(j).trim()) { next = textOf(j); break; }
+        return isChapterStart(textOf(k).trim(), next) || /^(?:heading|judul)\s*1$/i.test(n.styleId ?? "") || /<w:outlineLvl w:val="0"/.test(pPr);
+    };
+
     const keep = new Set<number>();
     let listing = false;
     for (let k = 0; k < nodes.length; k++) {
         const role = outline.items[k]?.role;
         if (inToc[k]) { keep.add(tops[k]); continue; }
+        // Awal BAB I yang diikuti isi bab selalu menang, walaupun pengenal struktur mengira baris
+        // ini masih entri daftar (Daftar Lampiran ketikan yang langsung disusul BAB I di halaman
+        // berikutnya). Tanpa ini seluruh isi bab sampai bab "BAB …" berikutnya ikut terbuang.
+        if (listing && role === "list_entry" && candidate(k) && headingLike(k)) {
+            const no = chapterNo(textOf(k).trim());
+            if ((no === null || no === 1) && bodyAfter(k).body) {
+                const end = tops[k];
+                return { end, keep: [...keep].filter((i) => i < end).sort((a, b) => a - b) };
+            }
+        }
         if (role === "list_heading") { listing = true; keep.add(tops[k]); continue; }
         if (listing && (role === "list_entry" || role === "empty" || nodes[k].kind === "table")) { keep.add(tops[k]); continue; }
         const isCand = candidate(k);
@@ -366,12 +409,12 @@ type Merged = {
  *  - isian yang memuat isian lain (judul Inggris berisi judul Indonesia, judul berisi nama) tidak lolos;
  *  - tidak ada yang lolos → kosong (titik-titik, diisi lewat form). Lebih baik kosong daripada salah.
  */
-function merge(x: Extraction, ai: AiData | null, input: FrontFieldInput, pageNorms: string[]): Merged {
+function merge(x: Extraction, ai: AiData | null, input: FrontFieldInput, pageNorms: string[], doubt: Set<FrontFieldKey | "prosa"> = new Set()): Merged {
     const fields = emptyFieldsOf();
     const sources = nulls<FieldSource>(null);
     const disagree: string[] = [];
     const txt = (r: Rich | string | null | undefined) => (r == null ? "" : typeof r === "string" ? r : richText(r).replace(/\s+/g, " ").trim());
-    void pageNorms;
+    const pagesWith = (v: string) => { const n = squashNorm(v); return n.length < 4 ? 0 : pageNorms.filter((p) => p.includes(n)).length; };
     // Judul Inggris dari halaman abstract bila sampul tidak memuatnya.
     const ruleOf = (k: FrontFieldKey): Rich | string | null => {
         let v = x.fields[k] ?? (k === "judulInggris" && x.abstract?.title?.length ? x.abstract.title : null);
@@ -412,7 +455,11 @@ function merge(x: Extraction, ai: AiData | null, input: FrontFieldInput, pageNor
         let pick: { v: Rich | string; src: FieldSource } | null = null;
         if (ruleOk && aiOk) {
             pick = { v: rule!, src: simple(txt(rule)) === simple(txt(fromAi)) ? "ai" : "aturan" };
-            if (pick.src === "aturan") disagree.push(`${FIELD_LABEL[k]}: AI membaca "${txt(fromAi).slice(0, 80)}", aturan membaca "${txt(rule).slice(0, 80)}" — dipakai hasil aturan.`);
+            // Bacaan aturan yang meragukan kalah dari bacaan AI yang dikonfirmasi lebih banyak halaman.
+            if (pick.src === "aturan" && doubt.has(k) && pagesWith(txt(fromAi)) > pagesWith(txt(rule))) {
+                disagree.push(`${FIELD_LABEL[k]}: aturan membaca "${txt(rule).slice(0, 80)}" (meragukan), AI membaca "${txt(fromAi).slice(0, 80)}" yang tercantum di lebih banyak halaman — dipakai hasil AI.`);
+                pick = { v: fromAi!, src: "ai" };
+            } else if (pick.src === "aturan") disagree.push(`${FIELD_LABEL[k]}: AI membaca "${txt(fromAi).slice(0, 80)}", aturan membaca "${txt(rule).slice(0, 80)}" — dipakai hasil aturan.`);
         } else if (ruleOk) pick = { v: rule!, src: "aturan" };
         else if (aiOk) pick = { v: fromAi!, src: "ai" };
         if (pick) { (fields as Record<string, unknown>)[k] = pick.v; sources[k] = pick.src; }
@@ -457,13 +504,42 @@ function merge(x: Extraction, ai: AiData | null, input: FrontFieldInput, pageNor
         kataPengantar: prose(ai?.kataPengantar, x.kataPengantar?.paras ?? null, (v) => v, "Kata pengantar"),
         abstrak: prose(ai?.abstrak, absOf(x.abstrak), (v) => v.paras, "Abstrak"),
         abstract: prose(ai?.abstract, absOf(x.abstract), (v) => v.paras, "Abstract"),
-        signatures: { ...x.signatures, ...ai?.signatures },
+        // Tanda tangan: bacaan aturan (menurut letak tampil) didahulukan; AI mengisi yang belum ada.
+        signatures: { ...ai?.signatures, ...x.signatures },
         pernyataanPics: ai?.pernyataanPics?.length ? ai.pernyataanPics : x.pernyataanPics,
         kataPengantarPics: ai?.kataPengantarPics?.length ? ai.kataPengantarPics : x.kataPengantar?.closingPics ?? [],
     };
 }
 
 type AiRead = { data: AiData | null; note: string | null; listing: string; answer: unknown };
+
+/**
+ * Keyakinan bacaan aturan, per data. AI hanya dipanggil bila ada data yang meragukan, dan hanya
+ * untuk data itu jawabannya boleh menggantikan aturan. Yakin bila:
+ *  - judul/nama/NPM: nilai yang sama muncul di ≥ 2 halaman bagian depan (sampul, sampul kedua,
+ *    pengesahan, pernyataan, abstrak saling mengonfirmasi);
+ *  - tahun: baris 4 angka yang berdiri sendiri di bawah sampul, sama di sampul kedua (bila ada);
+ *  - data lain (penanda tangan, tanggal, judul Inggris): terbaca lewat labelnya (jabatan, "Tanggal …").
+ * Data opsional yang tidak ada di naskah (pembimbing anggota, ketua sidang, tanggal) tidak dianggap
+ * meragukan: halamannya terbaca dan memang tidak memuatnya. Data wajib yang kosong = meragukan.
+ */
+function doubtful(x: Extraction, pageNorms: string[], found: FrontPageKind[]): Set<FrontFieldKey | "prosa"> {
+    const out = new Set<FrontFieldKey | "prosa">();
+    const txt = (v: Rich | string | null) => (v == null ? "" : typeof v === "string" ? v : richText(v));
+    const pagesWith = (v: string) => { const n = squashNorm(v); return n.length < 4 ? 0 : pageNorms.filter((p) => p.includes(n)).length; };
+    const REQUIRED: FrontFieldKey[] = ["judul", "nama", "npm", "tahun", "pembimbingUtama", "dekan"];
+    for (const k of FIELD_KEYS) {
+        const v = x.fields[k] ?? (k === "judulInggris" && x.abstract?.title?.length ? x.abstract.title : null);
+        if (v == null || !txt(v).trim()) {
+            if (REQUIRED.includes(k) || (k === "judulInggris" && !found.includes("abstract"))) out.add(k);
+            continue;
+        }
+        if ((k === "judul" || k === "nama" || k === "npm") && pagesWith(txt(v)) < 2) out.add(k);
+        if (k === "tahun" && !/^(?:19|20)\d{2}$/.test(txt(v).trim())) out.add(k);
+    }
+    if (!x.kataPengantar?.paras.length || !x.abstrak?.paras.length || !x.abstract?.paras.length) out.add("prosa");
+    return out;
+}
 
 async function aiRead(ai: FrontAI | undefined, items: Item[], pageOf: Map<Item, FrontPageKind>): Promise<AiRead> {
     const listing = buildListing(items, (it) => pageOf.get(it));
@@ -514,8 +590,9 @@ export async function analyzeFront(model: DocModel, config: FormatConfig, ai?: F
     if (!spec) return empty(null);
     const r = readNaskah(model, footers);
     if (typeof r === "string") return empty(r);
-    const { data } = await aiRead(ai, r.items, r.pageOf);
-    const m = merge(r.x, data, {}, r.pageNorms);
+    const doubt = doubtful(r.x, r.pageNorms, r.found);
+    const { data } = doubt.size ? await aiRead(ai, r.items, r.pageOf) : { data: null };
+    const m = merge(r.x, data, {}, r.pageNorms, doubt);
     const res = empty(null);
     res.found = r.found;
     res.missing = missingPages(m);
@@ -614,6 +691,24 @@ function templateDrift(pages: { kind: FrontPageKind; xml: string }[], spec: NonN
     return missing;
 }
 
+/** Kata pada baris panjang (kalimat) bagian depan naskah yang tidak muncul di hasil template. */
+export function unaccountedWords(beforeText: string, afterText: string): { words: number; lines: string[] } {
+    const out = squashNorm(afterText);
+    const lines: string[] = [];
+    let words = 0;
+    for (const l of beforeText.split("\n")) {
+        const t = l.trim();
+        if (t.length < 80) continue;
+        const n = squashNorm(t);
+        if (!n || out.includes(n)) continue;
+        // Baris daftar (berakhiran nomor halaman / titik-titik) bukan isi.
+        if (/(?:\.{3,}|\u2026|\s)\s*[ivxlcdm\d]+\s*$/i.test(t) && t.length <= 200) continue;
+        lines.push(t);
+        words += t.split(/\s+/).length;
+    }
+    return { words, lines };
+}
+
 function titleNotes(judul: string): string[] {
     const out: string[] = [];
     const words = judul.split(/\s+/).filter(Boolean);
@@ -627,12 +722,36 @@ function titleNotes(judul: string): string[] {
     return out;
 }
 
+/**
+ * Bagian depan dari template. Gagal di tahap mana pun (batas BAB I tidak pasti, template rusak,
+ * isi naskah tak tertampung) → template TIDAK dipakai dan naskah tidak diubah di tahap ini;
+ * alasannya dilaporkan dan sisa dokumen tetap diformat. Lebih baik bagian depan tidak disusun ulang
+ * daripada isi skripsi ikut terbuang.
+ */
 export async function buildFrontMatter(
     zip: JSZip,
     model: DocModel,
     config: FormatConfig,
     input: FrontFieldInput = {},
     ai?: FrontAI,
+    opts: { aiAlways?: boolean } = {},
+): Promise<FrontResult> {
+    try {
+        return await buildFrontMatterInner(zip, model, config, input, ai, opts);
+    } catch (e) {
+        const msg = e instanceof Error ? e.message.replace(/^Bagian depan tidak dapat disusun dari template [^:]*:\s*/, "") : String(e);
+        console.error(`[front-template] dibatalkan: ${msg}`);
+        return empty(msg);
+    }
+}
+
+async function buildFrontMatterInner(
+    zip: JSZip,
+    model: DocModel,
+    config: FormatConfig,
+    input: FrontFieldInput = {},
+    ai?: FrontAI,
+    opts: { aiAlways?: boolean } = {},
 ): Promise<FrontResult> {
     const preset = presetById(config.presetId);
     const spec = preset.front;
@@ -642,8 +761,8 @@ export async function buildFrontMatter(
         console.warn(`[front-template] ${preset.id}: template tidak dipakai — ${reason}`);
         return empty(reason);
     }
-    // Mulai sini template WAJIB dipakai. Tidak ada jalan kembali ke penyusunan bagian depan cara lama:
-    // kegagalan = error yang jelas (dan tercatat di log), bukan hasil yang diam-diam berantakan.
+    // Kegagalan di bawah ini dilempar lalu ditangkap buildFrontMatter: template batal, alasannya
+    // dilaporkan, naskah tidak diubah di tahap ini.
     const fail = (msg: string, status: number, cause?: unknown): never => {
         console.error(`[front-template] ${preset.id}: GAGAL — ${msg}`, cause ?? "");
         throw Object.assign(new Error(`Bagian depan tidak dapat disusun dari template ${preset.name}: ${msg}`), { status });
@@ -658,8 +777,13 @@ export async function buildFrontMatter(
         fail(e instanceof TemplateError ? e.message : "berkas template tidak dapat dibaca.", 500, e);
     }
 
-    const aiRes = await aiRead(ai, r.items, r.pageOf);
-    const m = merge(r.x, aiRes.data, input, r.pageNorms);
+    // AI hanya bila bacaan aturan meragukan (hemat waktu & biaya; aturan lebih bisa diperiksa).
+    const doubt = doubtful(r.x, r.pageNorms, r.found);
+    const aiRes: AiRead = doubt.size || opts.aiAlways
+        ? await aiRead(ai, r.items, r.pageOf)
+        : { data: null, note: ai ? "Semua data bagian depan terbaca yakin oleh aturan (dikonfirmasi antarhalaman); AI tidak diperlukan." : null, listing: "", answer: null };
+    if (doubt.size && ai) console.info(`[front-template] data meragukan, AI dipakai untuk: ${[...doubt].join(", ")}`);
+    const m = merge(r.x, aiRes.data, input, r.pageNorms, doubt);
 
     // Tempat & tanggal yang tidak ada di naskah diisi otomatis (bukan tanggal contoh template).
     const now = new Date();
@@ -686,6 +810,7 @@ export async function buildFrontMatter(
             signatures: m.signatures,
             pernyataanPics: m.pernyataanPics,
             kataPengantarPics: m.kataPengantarPics,
+            labels: { roles: r.x.roleLabels, date: m.sources.tanggalSidang === "aturan" ? r.x.dateLabel ?? undefined : undefined },
         }, {
             zip, rootTag,
             maxDocPr: maxOf(/<wp:docPr\b[^>]*\bid="(\d+)"/g),
@@ -698,6 +823,22 @@ export async function buildFrontMatter(
 
     // Namespace yang dipakai template/tanda tangan tetapi belum dideklarasikan naskah.
     const ns = missingNamespaces(rootTag, fill.xml, [tpl.rootTag, ...[...m.pernyataanPics, ...m.kataPengantarPics, ...Object.values(m.signatures)].map((p) => p?.xml ?? ""), model.head]);
+
+    // Pengaman sebelum naskah diubah: isi yang akan diganti harus tertampung di template, dan
+    // ukurannya wajar untuk bagian depan.
+    {
+        const regionText = fingerprint(model.body.slice(0, r.region.end).map(serializeBlock).join("")).text;
+        const acc = unaccountedWords(regionText, fingerprint(fill.xml).text);
+        if (acc.words > 800) {
+            fail(`${acc.words} kata di bagian sebelum BAB I tidak tertampung di template (mis. "${acc.lines[0]?.slice(0, 70) ?? ""}…"). Kemungkinan batas BAB I salah terbaca, jadi bagian depan dibiarkan seperti naskah.`, 422);
+        }
+        const wordsOf = (t: string) => t.split(/\s+/).filter(Boolean).length;
+        const regionWords = wordsOf(regionText);
+        const totalWords = wordsOf(fingerprint(bodyXml).text);
+        if (regionWords > 4000 && regionWords > totalWords * 0.3) {
+            fail(`bagian sebelum BAB I terbaca ${regionWords} kata (${Math.round((regionWords / totalWords) * 100)}% naskah) — terlalu besar untuk bagian depan. Kemungkinan batas BAB I salah terbaca, jadi bagian depan dibiarkan seperti naskah.`, 422);
+        }
+    }
     if (ns && rootTag) model.head = model.head.replace(rootTag, rootTag.replace(/>$/, `${ns}>`));
 
     // Halaman daftar (DAFTAR ISI dst.) selalu disusun formatter sesudah template; daftar buatan
@@ -734,6 +875,9 @@ export async function buildFrontMatter(
     notes.push(`Data bagian depan${viaAi ? " (dibaca dengan bantuan AI, disalin dari teks naskah)" : ""}: ${FIELD_KEYS.filter((k) => text[k]).map((k) => `${FIELD_LABEL[k]}: ${text[k]}${m.sources[k] === "pengguna" ? " (isian pengguna)" : ""}`).join("; ")}.`);
     if (aiRes.note) notes.push(aiRes.note);
     if (aiRes.data?.rejected.length) notes.push(`Tunjukan AI untuk ${aiRes.data.rejected.join(", ")} tidak lolos pemeriksaan; dipakai pembacaan aturan.`);
+    if (fill.dropped.length) {
+        notes.push(`Tidak ada di lembar pengesahan naskah, jadi dihapus dari template (tidak diisi titik-titik): ${fill.dropped.map((k) => FIELD_LABEL[k]).join(", ")}.`);
+    }
     if (fill.placeholders.length) {
         notes.push(`Data berikut tidak ditemukan di naskah dan diisi titik-titik: ${fill.placeholders.map((k) => FIELD_LABEL[k]).join(", ")}. Lengkapi lewat isian data bagian depan atau langsung di Word.`);
     }
@@ -762,7 +906,7 @@ export async function buildFrontMatter(
     if (auto.length) notes.push(`${auto.map((k) => FIELD_LABEL[k]).join(", ")} tidak ditemukan di naskah dan diisi otomatis (${auto.map((k) => text[k]).join("; ")}). Sesuaikan bila perlu.`);
 
     // Pemeriksaan: teks baku template (yang bukan isian) harus utuh di hasil.
-    const drift = templateDrift(tpl.pages, spec, after.text);
+    const drift = templateDrift(tpl.pages, spec, after.text).filter((t) => !fill.altered.some((a) => a && squashNorm(t).includes(squashNorm(a))));
     for (const t of drift) issues.push({ level: "error", message: `Bagian depan menyimpang dari template: teks "${t.slice(0, 80)}" tidak ada di hasil.` });
 
     // Cek akhir isian: di satu halaman tidak boleh ada baris yang sama dua kali (judul dobel dsb.),

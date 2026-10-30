@@ -9,6 +9,9 @@ import {
     flatten, markStyleNumbering, parseDocument, serializeDocument, tableText,
     type BlockNode, type ParaNode, type TableNode,
 } from "./document-model";
+import { serializeBlock } from "./document-model";
+import { contentLoss, guardBaseline } from "./content-guard";
+import { fillPageRefs } from "./page-estimate";
 import { applyFormat, collapseEmptyPages, readStyleLook, type ApplyReport } from "./apply-format";
 import {
     createBlankPart, createPageNumberFooter, enableUpdateFields, inspectHeaders,
@@ -66,7 +69,7 @@ import { blackenLinks } from "./link-color";
 import { clearFloatingSignatures, fitCoverPages, fitStatementPage } from "./cover-fit";
 import { inlineFloatingImages } from "./float-inline";
 import { boxStatementPages, findFrameTables, removeFrameShapes, STATEMENT_BOX_EXTRA, statementRanges, unwrapStatementFrames } from "./statement";
-import { buildFrontMatter, type FrontAI, type FrontReport } from "../front";
+import { buildFrontMatter, skipFront, type FrontAI, type FrontReport } from "../front";
 import type { FrontFieldInput } from "../front/types";
 
 export type TransformResult = {
@@ -91,10 +94,12 @@ export type TransformResult = {
     coverRemoved: { tables: number; rows: number; cells: number };
     /** Bila teks gagal diverifikasi: baris tersisa (asli vs hasil) yang tidak dilaporkan modul mana pun. */
     unexplained: { a: string[]; b: string[] } | null;
+    /** Pengaman anti-kehilangan (content-guard): kosong = aman. */
+    loss: string[];
     /** Template bagian depan: data yang dipakai, sumbernya, dan baris yang tidak terpakai (untuk form konfirmasi). */
     front: FrontReport;
     /** Perubahan jumlah tabel/baris/sel/gambar yang SENGAJA dibuat formatter (bagian depan template, tanda tangan, bingkai). */
-    intended: { tables: number; rows: number; cells: number; drawings: number };
+    intended: { tables: number; rows: number; cells: number; drawings: number; equations: number };
 };
 
 export type TransformOptions = {
@@ -106,6 +111,10 @@ export type TransformOptions = {
     frontFields?: FrontFieldInput;
     /** AI penunjuk baris data bagian depan (opsional; tanpa ini dibaca dengan aturan). */
     frontAI?: FrontAI;
+    /** Uji: AI bagian depan selalu dipanggil (bawaan: hanya bila bacaan aturan meragukan). */
+    frontAIAlways?: boolean;
+    /** Tangga cadangan: jangan pakai template bagian depan (alasannya dicatat). */
+    noFront?: string;
 };
 
 type SectionRef = { where: "para"; node: ParaNode } | { where: "body" };
@@ -266,7 +275,6 @@ export async function transformDocx(
     const numbering0 = (await zip.file("word/numbering.xml")?.async("string")) ?? "";
     const stylesXml = await zip.file("word/styles.xml")?.async("string");
     const shownBefore = displayedLabels(model, numbering0, stylesXml ?? "");
-    const headingsBefore = shownHeadings(shownBefore.map);
     // Lampiran (sesudah Daftar Pustaka s.d. akhir) dibekukan: dikembalikan ke XML asli di akhir.
     const freeze = findAppendixRegion(model);
     const divInd0 = divIndents(model);
@@ -276,7 +284,15 @@ export async function transformDocx(
     const aiOf = new Map<ParaNode | TableNode, Role | null>(preNodes.map((n, i) => [n, opts.aiRoles?.[i] ?? null]));
     // Bagian depan (sampul s.d. abstract) dari template preset. Hasilnya satu blok XML di awal body
     // yang tidak dilihat modul lain, jadi tata letaknya tidak diubah lagi.
-    const front = await buildFrontMatter(zip, model, config, opts.frontFields ?? {}, opts.frontAI);
+    const front = opts.noFront
+        ? skipFront(opts.noFront)
+        : await buildFrontMatter(zip, model, config, opts.frontFields ?? {}, opts.frontAI, { aiAlways: opts.frontAIAlways });
+    // Pengaman anti-kehilangan: isi naskah yang tersisa sesudah bagian depan diganti.
+    const guardBase = await guardBaseline(zip, model.body.filter((b) => b.kind !== "raw").map(serializeBlock).join(""), []);
+    // Judul bernomor yang diperiksa = yang masih ada sesudah bagian depan diganti template (baris
+    // Daftar Isi lama ikut diganti, jadi bukan "nomor judul yang hilang").
+    const stillThere = new Set(allParagraphs(model));
+    const headingsBefore = shownHeadings(new Map([...shownBefore.map].filter(([p]) => stillThere.has(p))));
     const chapters = unifyChapterHeadings(model);
     // Foto melayang + keterangan berupa kotak teks melayang (susunan buatan tangan) → foto inline +
     // keterangan paragraf biasa. Hanya bila susunannya pasti; selebihnya dibiarkan.
@@ -300,6 +316,13 @@ export async function transformDocx(
     const styleLook = stylesXml ? readStyleLook(stylesXml) : undefined;
     const aiRoles = nodes.map((n) => aiOf.get(n) ?? null);
     const outline = buildOutline(nodes, aiRoles, chapters.chapterIds);
+    nodes.forEach((n, i) => {
+        const it = outline.items[i];
+        if (n.kind !== "paragraph" || !it || it.zone !== "main" || frozenParas.has(n)) return;
+        if (it.role !== "chapter" && it.role !== "section" && it.role !== "subsection") return;
+        const t = n.text.replace(/^\s*(?:bab\s+)?(?:[\dIVX]+(?:\.\d+)*\.?|\(?[A-Za-z][.)])\s*/i, "").trim();
+        if (t.length >= 4 && t.length <= 150) guardBase.headings.push(t);
+    });
     const trace = (stage: string) => { if (opts.trace) opts.trace(stage, serializeDocument(model)); };
     trace("01 bagian depan, judul bab, gambar dipisah");
     const promoted = promoteUnnumberedCaptions(nodes, outline);
@@ -353,10 +376,14 @@ export async function transformDocx(
     // Lembar pernyataan: kotak bingkai buatan penulis dibuang; preset "box" memberi bingkai halaman
     // seragam, jadi halamannya perlu section sendiri.
     const statements = config.statementFrame === "keep" ? [] : statementRanges(nodes, outline);
+    let frameShapesRemoved = 0;
     if (statements.length) {
         const fp = rules.page("front");
         const area = { width: fp.widthTwips - fp.margin.left - fp.margin.right, height: fp.heightTwips - fp.margin.top - fp.margin.bottom };
+        const drawingsNow = () => fingerprint(serializeDocument(model)).drawings;
+        const d0 = drawingsNow();
         const shapes = statements.reduce((a, r) => a + removeFrameShapes(nodes, r, area), 0);
+        if (shapes) frameShapesRemoved = d0 - drawingsNow();
         if (shapes) notes.push(`${shapes} kotak bingkai buatan di lembar pernyataan diganti ${config.statementFrame === "box" ? "kotak seragam setinggi isi" : "tanpa bingkai"}.`);
 
     }
@@ -534,6 +561,7 @@ export async function transformDocx(
             upper: config.chapterUppercase,
             exact: config.lineRule === "exact",
             frontRows: front.tocRows,
+            frontRoman: config.romanFrontMatter,
         })
         : null;
     const toc: TocReport = tocFields ?? columns!.report;
@@ -639,6 +667,27 @@ export async function transformDocx(
         return Boolean(x) && isLandscape(x!) && !toPortrait[i];
     });
 
+    // Jarak header/footer seragam (nomor halaman setinggi yang sama di semua halaman): mengikuti
+    // template bagian depan bila dipakai, selain itu jarak yang paling banyak dipakai naskah.
+    const distances = (() => {
+        if (!numbered) return undefined;
+        const pick = (x: string, k: string) => Number(new RegExp(`<w:pgMar\\b[^>]*w:${k}="(\\d+)"`).exec(x)?.[1] ?? NaN);
+        const raw = model.body.find((b): b is Extract<typeof b, { kind: "raw" }> => b.kind === "raw" && /<w:pgMar\b/.test(b.xml));
+        if (front.built && raw) {
+            // Section terakhir template = halaman bernomor (Kata Pengantar dst.), bukan sampul.
+            const last = [...raw.xml.matchAll(/<w:pgMar\b[^>]*\/>/g)].pop()?.[0] ?? "";
+            const h = pick(last, "header"), f = pick(last, "footer");
+            if (h >= 0 && f > 0) return { header: h, footer: f };
+        }
+        const count = new Map<string, number>();
+        for (const s of sections) {
+            const x = sectXml(s) ?? "";
+            const h = pick(x, "header"), f = pick(x, "footer");
+            if (h >= 0 && f > 0) count.set(`${h}/${f}`, (count.get(`${h}/${f}`) ?? 0) + 1);
+        }
+        const best = [...count].sort((a, b) => b[1] - a[1])[0]?.[0];
+        return best ? { header: Number(best.split("/")[0]), footer: Number(best.split("/")[1]) } : undefined;
+    })();
     sections.forEach((s, i) => {
         const num = numbering[i];
         const stillLandscape = landscapeAfter[i];
@@ -661,6 +710,7 @@ export async function transformDocx(
                 ? { footer: blankFooter, header: blankHeader } : undefined,
             orientation: toPortrait[i] ? "portrait" : undefined,
             continuous: continuous || undefined,
+            distances,
         };
         if (stillLandscape) landscapeSections++;
         if (toPortrait[i]) portraitConverted++;
@@ -821,6 +871,9 @@ export async function transformDocx(
     let thawed: RestoreReport | null = null;
     if (freeze.frozen) {
         thawed = restoreAppendix(model, freeze.frozen, usableWidth, page.heightTwips - page.margin.top - page.margin.bottom);
+        // Spasi otomatis HTML dari style ("Normal (Web)") juga dimatikan di lampiran: celahnya bukan
+        // tata letak asli yang disengaja, hanya bawaan teks tempelan. Teks tidak berubah.
+        if (!thawed.problem) neutralizeAutoSpacing(model, pageInfo, stylesXml ?? "");
         if (thawed.problem) notes.push(`Lampiran tidak bisa dikembalikan persis seperti aslinya (${thawed.problem}); isi lampiran ikut dirapikan — periksa bagian lampiran.`);
         else {
             const extra = [
@@ -835,6 +888,7 @@ export async function transformDocx(
     const finalXml = serializeDocument(model);
     zip.file("word/document.xml", finalXml);
     const after = fingerprint(finalXml);
+    const loss = await contentLoss(guardBase, zip, finalXml);
 
     const verifyOpts0: VerifyOptions = {
         unorderedPrefix: cover.reordered ? cover.coverLines : 0,
@@ -864,7 +918,7 @@ export async function transformDocx(
             tables: signatures.added.tables - tpl.removed.tables - (unwrapped?.tables ?? 0) + boxed + front.delta.tables,
             rows: signatures.added.rows - tpl.removed.rows - (unwrapped?.rows ?? 0) + boxed + front.delta.rows,
             cells: signatures.added.cells - tpl.removed.cells - (unwrapped?.cells ?? 0) + boxed + front.delta.cells,
-            drawings: front.delta.drawings - figGroups.removedDrawings,
+            drawings: front.delta.drawings - figGroups.removedDrawings - frameShapesRemoved,
             equations: front.delta.equations,
         },
         removedImageIds: front.removedImageIds,
@@ -890,6 +944,16 @@ export async function transformDocx(
             : n.hasDrawing && !n.text.trim() ? "[Gambar]" : n.text.replace(/\t/g, " ").slice(0, 280),
     }))];
 
+    // Sesudah diverifikasi: hasil tersimpan field nomor halaman daftar diisi perkiraan halaman
+    // (hanya angka di dalam field; field tetap diperbarui Word saat dibuka).
+    {
+        const docNow = (await zip.file("word/document.xml")?.async("string")) ?? "";
+        const filled = fillPageRefs(docNow, (await zip.file("word/styles.xml")?.async("string")) ?? "");
+        if (filled.filled) {
+            zip.file("word/document.xml", filled.xml);
+            notes.push(`${filled.filled} nomor halaman di daftar isi/tabel/ilustrasi/lampiran diisi perkiraan (untuk aplikasi yang tidak memperbarui field, mis. LibreOffice). Word memperbaruinya otomatis saat file dibuka (pilih "Yes"/"Ya").`);
+        }
+    }
     const buffer = await zip.generateAsync({
         type: "uint8array",
         compression: "DEFLATE",
@@ -918,7 +982,8 @@ export async function transformDocx(
         headings,
         coverRemoved: tpl.removed,
         unexplained,
-        intended: { ...verifyOpts.added!, drawings: verifyOpts.added!.drawings ?? 0 },
+        loss,
+        intended: { ...verifyOpts.added!, drawings: verifyOpts.added!.drawings ?? 0, equations: verifyOpts.added!.equations ?? 0 },
         front: {
             built: front.built, reason: front.reason, found: front.found, missing: front.missing,
             fields: front.fields, sources: front.sources, unmapped: front.unmapped,

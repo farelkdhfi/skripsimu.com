@@ -40,6 +40,9 @@ export type SectionPlan = {
      */
     firstPageBlank?: { footer: string; header: string };
 
+    /** Jarak header/footer dari tepi kertas (twip), seragam untuk semua section. Kosong = biarkan. */
+    distances?: { header: number; footer: number };
+
     /** Paksa portrait (tabel landscape yang ternyata muat). */
     orientation?: "portrait";
     /** Section dimulai menyambung, bukan halaman baru. */
@@ -113,7 +116,7 @@ export function patchSectPr(sectPr: string, plan: SectionPlan): string {
         "w:pgMar":
             `<w:pgMar w:top="${mar.top}" w:right="${mar.right}" ` +
             `w:bottom="${mar.bottom}" w:left="${mar.left}" ` +
-            `w:header="${keep("header", "708")}" w:footer="${keep("footer", "708")}" w:gutter="${keep("gutter", "0")}"/>`,
+            `w:header="${plan.distances?.header ?? keep("header", "708")}" w:footer="${plan.distances?.footer ?? keep("footer", "708")}" w:gutter="${keep("gutter", "0")}"/>`,
     };
     if (plan.continuous) patch["w:type"] = `<w:type w:val="continuous"/>`;
     if (plan.firstPageBlank) patch["w:titlePg"] = "<w:titlePg/>";

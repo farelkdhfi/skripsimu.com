@@ -101,7 +101,7 @@ export function splitAtSeparator(xml: string, sep: "=" | ":", nth = 1): { xml: s
 }
 
 /** Lebar kira-kira teks (twip) pada ukuran huruf `halfPts`. */
-function textWidth(s: string, halfPts: number): number {
+export function textWidth(s: string, halfPts: number): number {
     let w = 0;
     // Kira-kira lebar huruf Times New Roman (em): kapital lebar, angka 0,5, spasi & tanda baca sempit.
     for (const ch of s) {

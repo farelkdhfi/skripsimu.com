@@ -9,6 +9,7 @@ import { cellParagraphs, isInvisible, nextVisible, prevVisible, tableText, type 
 import { formatParagraph, type ApplyReport } from "./apply-format";
 import type { FormatRules, ParaFormat, RunFormat, TableFormat } from "../rules/format-rules";
 import type { Outline } from "../structure/outline";
+import { textWidth } from "./legend";
 /* ------------------------------------------------------------------ */
 /* Tata letak tabel                                                     */
 /* ------------------------------------------------------------------ */
@@ -92,6 +93,10 @@ export function normalizeTable(table: TableNode, t: FormatTableCtx, rep: ApplyRe
     }
   }
 
+  // Kolom terlalu sempit untuk kata terpanjangnya ("JKG" terpotong jadi "JK/G"): dilebarkan
+  // seperlunya, diambil dari kolom yang masih lega. Hanya bila semua kolom tetap muat.
+  if (table.grid) widenNarrowColumns(table, fmt.fontSize * 2, fmt.cellMargin, hasHeaderRow);
+
   // Lebar kolom diturunkan dari w:tblGrid agar baris ber-gridSpan tetap sejajar.
   const gridW = table.grid
     ? [...table.grid.matchAll(/<w:gridCol\s+w:w="(\d+)"\s*\/>/g)].map((m) => Number(m[1]))
@@ -155,6 +160,37 @@ export function normalizeTable(table: TableNode, t: FormatTableCtx, rep: ApplyRe
   });
 
   rep.tablesNormalized++;
+}
+
+function widenNarrowColumns(table: TableNode, halfPts: number, cellMargin: number, header: boolean) {
+  const gridW = [...table.grid!.matchAll(/<w:gridCol\s+w:w="(\d+)"\s*\/>/g)].map((m) => Number(m[1]));
+  if (gridW.length < 2) return;
+  const need = gridW.map(() => 0);
+  table.rows.forEach((row, ri) => {
+    let col = 0;
+    for (const c of row.cells) {
+      const span = c.props ? Number(/<w:gridSpan\s+w:val="(\d+)"/.exec(c.props)?.[1] ?? 1) : 1;
+      if (span === 1 && col < need.length && !c.children.some((x) => x.kind === "table")) {
+        const bold = ri === 0 && header;
+        for (const p of cellParagraphs(c)) {
+          for (const w of p.text.split(/[\s\u00a0]+/)) {
+            if (!w) continue;
+            const wd = textWidth(w, halfPts) * (bold ? 1.08 : 1) + 2 * cellMargin + 40;
+            if (wd > need[col]) need[col] = wd;
+          }
+        }
+      }
+      col += span;
+    }
+  });
+  const deficit = gridW.reduce((a, w, j) => a + Math.max(0, need[j] - w), 0);
+  if (deficit <= 0) return;
+  const slack = gridW.map((w, j) => Math.max(0, w - Math.max(need[j], 200)));
+  const totalSlack = slack.reduce((a, b) => a + b, 0);
+  if (totalSlack < deficit) return;
+  const out = gridW.map((w, j) => Math.round(need[j] > w ? need[j] : w - (slack[j] / totalSlack) * deficit));
+  let idx = 0;
+  table.grid = table.grid!.replace(/<w:gridCol\s+w:w="\d+"\s*\/>/g, () => `<w:gridCol w:w="${out[idx++]}"/>`);
 }
 
 /* ------------------------------------------------------------------ */

@@ -131,6 +131,10 @@ export function unifyChapterHeadings(model: DocModel): ChapterHeadReport {
       for (let k = c.title; k > c.i; k--) { out.removed.add(body[k] as ParaNode); body.splice(k, 1); }
       out.merged++;
     } else {
+      // Sudah berbentuk judul dua baris ("I" ↵ "PENDAHULUAN" dengan ganti baris di paragraf yang
+      // sama): tidak diubah, cukup ditandai sebagai bab.
+      const firstBr = /^(?:(?!<w:br\b)[\s\S])*?<w:t(?:\s[^>]*)?>\s*([IVX]{1,5})\s*\.?\s*<\/w:t>(?:(?!<w:t\b)[\s\S])*?<w:br\/>/.exec(p.xml.slice(Math.max(0, p.xml.indexOf("</w:pPr>"))));
+      if (firstBr && firstBr[1] === /^[IVX]{1,5}/.exec(norm(p.text))?.[0]) { if (c.bare) out.chapterIds.add(p.id); continue; }
       const m = BARE_LINE_RAW_RE.exec(leadingRaw(p.xml, 20));
       if (!m) continue;
       const rPr = /<w:r(?:\s[^>]*)?>\s*(<w:rPr>[\s\S]*?<\/w:rPr>)/.exec(p.xml)?.[1] ?? "";

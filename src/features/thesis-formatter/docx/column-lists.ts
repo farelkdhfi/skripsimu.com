@@ -199,6 +199,8 @@ export function buildColumnLists(
     width: number; font: string; halfPts: number; bodyLine: number; upper: boolean; exact: boolean;
     /** Judul bagian depan yang disusun template (sudah ber-bookmark), dicantumkan paling awal di Daftar Isi. */
     frontRows?: { text: string; bookmark: string }[];
+    /** Halaman bagian depan bernomor Romawi: nomor di daftar isi ikut Romawi (juga di LibreOffice). */
+    frontRoman?: boolean;
   },
 ): { report: TocReport; regions: VerifyRegion[] } {
   const report: TocReport = { tocs: 0, entries: 0, replaced: 0, unwrapped: unwrapTocControls(model) };
@@ -343,10 +345,11 @@ export function buildColumnLists(
         return;
       }
       default:
-        // "Lampiran 1. Judul" yang bukan judul halaman (judul panjang di atas isi lampiran).
+        // "Lampiran 1. Judul" yang bukan judul halaman (judul panjang di atas isi lampiran). Titik
+        // penutup judul boleh ("… terhadap Asetil-KoA."); kalimat lanjutan di dalamnya tidak.
         if (it.zone === "back" && it.role === "body" && t.length <= 250) {
           const m = APPX_RE.exec(t);
-          if (m && /^[A-Z0-9(\u201c"]/.test(m[2]) && !/[.!?]$/.test(m[2])) {
+          if (m && /^[A-Z0-9(\u201c"]/.test(m[2]) && !/[.!?]["”)]?\s+[A-Z]/.test(m[2]) && !/[!?:;,]$/.test(m[2])) {
             listAppendix(n);
             const segs = afterPrefix(segmentsOf(n.xml), APPX_PREFIX);
             appendices.push({ type: "item", num: m[1], text: joined(segs) || m[2], segs, target: n });
@@ -367,13 +370,54 @@ export function buildColumnLists(
     `${italic ? "<w:i/><w:iCs/>" : ""}<w:sz w:val="${o.halfPts}"/><w:szCs w:val="${o.halfPts}"/></w:rPr>`;
   const run = (text: string, bold = false, italic = false) =>
     `<w:r>${rPr(bold, italic)}<w:t xml:space="preserve">${escapeXml(text)}</w:t></w:r>`;
+  /**
+   * Teks entri yang dipatahkan manual (ganti baris) supaya tidak masuk kolom "Halaman": tiap baris
+   * paling lebar `avail` twip (perkiraan lebar huruf, dengan cadangan). Potongan miring tetap.
+   */
+  const wrapRuns = (segs: Seg[] | undefined, text: string, avail: number, bold = false) => {
+    const parts: Seg[] = segs && segs.length ? segs : [{ t: text, i: false }];
+    const full = parts.map((p) => p.t).join("");
+    const width = (t: string) => textTwips(t, o.font, o.halfPts, bold) * 1.04;
+    const cuts: number[] = [];
+    let start = 0;
+    while (start < full.length && width(full.slice(start)) > avail) {
+      let cut = -1;
+      for (let i = start + 1; i < full.length; i++) {
+        if (full[i] !== " ") continue;
+        if (width(full.slice(start, i)) > avail) break;
+        cut = i;
+      }
+      if (cut === -1) break;               // satu kata lebih lebar dari kolom: biarkan
+      cuts.push(cut);
+      start = cut + 1;
+    }
+    if (!cuts.length) return runs(segs, text, bold);
+    const br = `<w:r>${rPr(bold)}<w:br/></w:r>`;
+    let out = "";
+    let pos = 0;
+    for (const p of parts) {
+      let t = p.t;
+      let at = pos;
+      for (const c of cuts) {
+        if (c < at || c >= at + t.length) continue;
+        const k = c - at;
+        if (t.slice(0, k)) out += run(t.slice(0, k), bold, p.i);
+        out += br;
+        t = t.slice(k + 1);
+        at = c + 1;
+      }
+      if (t) out += run(t, bold, p.i);
+      pos += p.t.length;
+    }
+    return out;
+  };
   /** Teks entri: potongan miring dari judul aslinya dipertahankan. */
   const runs = (segs: Seg[] | undefined, text: string, bold = false) =>
     segs && segs.length ? segs.map((s) => run(s.t, bold, s.i)).join("") : run(text, bold);
   const tab = (bold = false) => `<w:r>${rPr(bold)}<w:tab/></w:r>`;
-  const ref = (name: string, cached: string, bold = false) =>
+  const ref = (name: string, cached: string, bold = false, roman = false) =>
     `<w:r>${rPr(bold)}<w:fldChar w:fldCharType="begin" w:dirty="true"/></w:r>` +
-    `<w:r>${rPr(bold)}<w:instrText xml:space="preserve"> PAGEREF ${name} \\h </w:instrText></w:r>` +
+    `<w:r>${rPr(bold)}<w:instrText xml:space="preserve"> PAGEREF ${name} \\h${roman ? " \\* roman" : ""} </w:instrText></w:r>` +
     `<w:r>${rPr(bold)}<w:fldChar w:fldCharType="separate"/></w:r>` +
     (cached ? run(cached, bold) : "") +
     `<w:r>${rPr(bold)}<w:fldChar w:fldCharType="end"/></w:r>`;
@@ -398,7 +442,10 @@ export function buildColumnLists(
       : "";
     const tabs = x.tabs ??
       `${x.center ? `<w:tab w:val="center" w:pos="${x.center}"/>` : ""}${x.hanging ? `<w:tab w:val="left" w:pos="${x.left}"/>` : ""}${column}`;
-    const right = x.dotEnd !== undefined ? Math.max(0, W - x.dotEnd) : 0;
+    // Baris bertitik-titik: TANPA indentasi kanan — tab yang melewati indentasi kanan dipatahkan
+    // LibreOffice ke baris baru (titik-titik & nomor turun ke bawah). Judul panjang dipatahkan
+    // sendiri (wrapRuns) sebelum kolom "Halaman". Baris bab (tanpa titik-titik) tetap berindentasi kanan.
+    const right = x.dotEnd !== undefined && x.noLeader ? Math.max(0, W - x.dotEnd) : 0;
     return `<w:p><w:pPr>${x.keepNext ? "<w:keepNext/>" : ""}${tabs ? `<w:tabs>${tabs}</w:tabs>` : ""}` +
       `<w:spacing w:before="${x.before ?? 0}" w:after="0" ${lineAttr(x.line ?? 240)}/>` +
       `<w:ind w:left="${x.left}" w:right="${right}" ${x.hanging ? `w:hanging="${x.hanging}"` : `w:firstLine="0"`}/>` +
@@ -431,12 +478,14 @@ export function buildColumnLists(
     const subText = secText + (subW ? subW + NUM_GAP : SUB);
     const out = [header("Bab", PAGE_LABEL, true)];
     let prev: Row["type"] | null = null;
+    let seenChapter = false;
     for (const r of rows) {
       if (r.type === "front") {
         const before = prev === null ? half : prev !== "front" ? half : 0;
         out.push(para({ left: COL, before, line: o.bodyLine, dotEnd },
-          run(r.text, true) + tab(true) + tab(true) + ref(r.bookmark ?? mark(r.target!), pageOf(cache, r.text), true)));
+          wrapRuns(undefined, r.text, dotEnd - COL - 300, true) + tab(true) + tab(true) + ref(r.bookmark ?? mark(r.target!), pageOf(cache, r.text), true, Boolean(o.frontRoman) && !seenChapter)));
       } else if (r.type === "chapter") {
+        seenChapter = true;
         // Baris bab: tanpa titik-titik & tanpa nomor halaman; tetap tidak masuk kolom "Halaman".
         out.push(para({ left: COL, hanging: COL, before: half, line: o.bodyLine, keepNext: true, noLeader: true, dotEnd, center: numCenter },
           tab(true) + (r.label ? run(r.label, true) : "") + tab(true) + runs(r.segs, r.text, true)));
@@ -444,7 +493,7 @@ export function buildColumnLists(
         const sub = r.type === "subsection";
         const left = sub ? subText : secText;
         out.push(para({ left, hanging: sub ? subText - secText : secText - COL, dotEnd },
-          (r.num ? run(r.num) : "") + tab() + runs(r.segs, r.text) + tab() + tab() +
+          (r.num ? run(r.num) : "") + tab() + wrapRuns(r.segs, r.text, dotEnd - left - 300) + tab() + tab() +
           ref(mark(r.target), pageOf(cache, `${r.num} ${r.text}`))));
       }
       prev = r.type;
@@ -460,7 +509,7 @@ export function buildColumnLists(
     rows.forEach((r, k) => {
       if (r.type !== "item") return;
       out.push(para({ left: COL, hanging: COL, before: k === 0 ? 240 : 120, dotEnd, center: numCenter },
-        tab() + run(r.num) + tab() + runs(r.segs, r.text) + tab() + tab() + ref(r.bookmark ?? mark(r.target!), pageOf(cache, r.text))));
+        tab() + run(r.num) + tab() + wrapRuns(r.segs, r.text, dotEnd - COL - 300) + tab() + tab() + ref(r.bookmark ?? mark(r.target!), pageOf(cache, r.text))));
     });
     return out.join("");
   };

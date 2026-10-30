@@ -40,6 +40,14 @@ export type Pic = {
     embeds: string[];
     /** Objek yang tidak bisa dipakai ulang (gambar format lama, grafik, …): alasannya. */
     unsupported?: string;
+    /** Dipecah dari satu grup gambar (beberapa tanda tangan dalam satu objek), urut atas→bawah, kiri→kanan. */
+    fromGroup?: boolean;
+    /**
+     * Posisi tegak objek melayang di naskah asli: acuan (`paragraph`/`line`/`page`/`margin`) dan
+     * jarak atas (twip). Dipakai untuk menentukan pemilik tanda tangan menurut letak tampilnya,
+     * bukan menurut paragraf tempat objek ditambatkan.
+     */
+    anchor?: { rel: string; top: number };
 };
 
 export type Item =

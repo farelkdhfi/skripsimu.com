@@ -157,12 +157,18 @@ export function residualLines(before: DocFingerprint, after: DocFingerprint, opt
   // Blok besar dulu: blok panjang (mis. Daftar Isi) paling pasti posisinya. Blok satu baris (judul
   // bab yang diseragamkan) yang diproses lebih dulu bisa "mengambil" baris kembarnya di Daftar Isi,
   // lalu blok Daftar Isi terpaksa mengambil baris dari isi bab.
-  const regions = opts.regions ?? [];
+  // Blok yang hanya mengubah spasi/tab (keterangan "R4 = 30%" → "R4⇥=⇥30%") tidak dikeluarkan:
+  // teks yang sama sering muncul berkali-kali (keterangan tabel yang diulang), dan mengeluarkan
+  // kemunculan yang salah merusak urutan. Baris itu dibandingkan tanpa spasi di kedua sisi.
+  const wsOnly = (r: VerifyRegion) => r.beforeLines.length === r.afterLines.length && r.beforeLines.every((l, i) => keyOf(l) === keyOf(r.afterLines[i]));
+  const all = opts.regions ?? [];
+  const wsKeys = new Set(all.filter(wsOnly).flatMap((r) => r.beforeLines.map(keyOf)));
+  const regions = all.filter((r) => !wsOnly(r));
   for (const r of [...regions].sort((x, y) => y.beforeLines.length - x.beforeLines.length)) a = removeGroup(a, r.beforeLines);
   for (const r of [...regions].sort((x, y) => y.afterLines.length - x.afterLines.length)) b = removeGroup(b, r.afterLines);
   const k = opts.unorderedPrefix ?? 0;
   const prep = (lines: string[]) => {
-    const low = lines.map((l) => l.toLowerCase().replace(/\s+/g, " ").trim()).filter(Boolean);
+    const low = lines.map((l) => (wsKeys.has(keyOf(l)) ? keyOf(l) : l.toLowerCase().replace(/\s+/g, " ").trim())).filter(Boolean);
     return [...low.slice(0, k).sort(), ...low.slice(k)];
   };
   return { a: prep(a), b: prep(b) };
