@@ -5,7 +5,7 @@
  *  - catatan di bawah tabel (Sumber/Keterangan/Catatan): 10 pt
  */
 import { escapeXml, mergeProps, withProps, PPR_ORDER, TBLPR_ORDER, TCPR_ORDER, TRPR_ORDER } from "./xml";
-import { cellParagraphs, tableText, type CellNode, type DocModel, type ParaNode, type TableNode } from "./document-model";
+import { cellParagraphs, isInvisible, nextVisible, prevVisible, tableText, type CellNode, type DocModel, type ParaNode, type TableNode } from "./document-model";
 import { formatParagraph, type ApplyReport } from "./apply-format";
 import type { FormatRules, ParaFormat, RunFormat, TableFormat } from "../rules/format-rules";
 import type { Outline } from "../structure/outline";
@@ -370,6 +370,10 @@ export function detectTableNotes(
       if (!head && !symbol && continuesListAbove(n, nodes, outline, i)) break;
       // Catatan ditulis kecil: baris berukuran normal sesudahnya bukan catatan.
       if (count > 0 && allSmall && !small && !head && !symbol) break;
+      // Judul bagian lain ("Kaidah Keputusan:", "Hipotesis:") atau kalimat pengantar yang diakhiri
+      // titik dua ("… dengan rumus sebagai berikut:") membuka isi baru: catatan tabel selesai.
+      // (Baris "simbol = arti" / "simbol : arti" tetap catatan.)
+      if (count > 0 && !head && !symbol && /:\s*$/.test(txt) && !NOTE_CONT_RE.test(txt)) break;
       const short = txt.length <= 200;
       // Butir bernomor hanya catatan bila berada di bawah judul catatan ("Keterangan:").
       const ok = count === 0
@@ -405,9 +409,10 @@ export function formatTableNotes(model: DocModel, rules: FormatRules, tableNotes
   const ordered = model.body.filter((n): n is ParaNode => n.kind === "paragraph" && tableNotes.has(n.id));
   ordered.forEach((p, idx) => {
     const kind = tableNotes.get(p.id)!;
+    // Bersebelahan bagi pembaca: penanda tak tampil (bookmark) di antaranya tidak memutus.
     const pos = model.body.indexOf(p);
-    const prevIsNote = idx > 0 && model.body.indexOf(ordered[idx - 1]) === pos - 1;
-    const nextIsNote = idx < ordered.length - 1 && model.body.indexOf(ordered[idx + 1]) === pos + 1;
+    const prevIsNote = idx > 0 && model.body.indexOf(ordered[idx - 1]) === prevVisible(model.body, pos);
+    const nextIsNote = idx < ordered.length - 1 && model.body.indexOf(ordered[idx + 1]) === nextVisible(model.body, pos);
     setSize(p, noteHalf);
     p.xml = withProps(p.xml, "w:pPr", {
       "w:spacing": `<w:spacing w:before="${prevIsNote ? 0 : 60}" w:after="${nextIsNote ? 0 : 240}" w:line="240" w:lineRule="auto"/>`,
@@ -429,7 +434,7 @@ export function spaceAfterTables(model: DocModel, tableNotes: TableNotes): numbe
   let count = 0;
   model.body.forEach((t, i) => {
     if (t.kind !== "table") return;
-    const p = model.body[i + 1];
+    const p = model.body[nextVisible(model.body, i)];
     if (!p || p.kind !== "paragraph") return;
     if (tableNotes.has(p.id) || !p.text.trim()) return;
     if (/<w:pStyle w:val="Caption"\/>/.test(p.xml)) return;
@@ -498,7 +503,7 @@ export function keepTableNotes(model: DocModel, tableNotes: TableNotes): number 
     for (let k = i + 1; k < body.length; k++) {
       const n = body[k];
       // Elemen tak tampil di antara paragraf (bookmarkEnd, permEnd, …) tidak memutus catatan.
-      if (n.kind === "raw") continue;
+      if (isInvisible(n)) continue;
       if (n.kind !== "paragraph" || !tableNotes.has(n.id)) break;
       notes.push(n);
     }

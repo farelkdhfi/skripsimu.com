@@ -11,7 +11,7 @@
  *  - bab yang keterangannya tidak semua dikenali tidak dinomori ulang (cegah nomor ganda)
  */
 import { escapeXml, withProps, PPR_ORDER } from "./xml";
-import { parseBlocks, textOf, type DocModel, type ParaNode, type TableNode } from "./document-model";
+import { isInvisible, parseBlocks, textOf, type BlockNode, type DocModel, type ParaNode, type TableNode } from "./document-model";
 import { paragraphLine, type VerifyRegion } from "./verify";
 import type { Outline, OutlineItem } from "../structure/outline";
 import { captionKind } from "../structure/roles";
@@ -438,7 +438,7 @@ export function arrangeCaptions(
     const isEmpty = (n: AnyNode) =>
         n.kind === "paragraph" && !n.text.trim() && !n.hasDrawing && !n.hasSectPr && !n.hasPageBreak;
     const nextContent = (from: number, step: 1 | -1) => {
-        for (let k = from + step; k >= 0 && k < body.length; k += step) if (!isEmpty(body[k])) return k;
+        for (let k = from + step; k >= 0 && k < body.length; k += step) if (!isEmpty(body[k]) && !isInvisible(body[k] as BlockNode)) return k;
         return -1;
     };
     const isObj = (k: number) => k !== -1 && isObject(s, body[k]);

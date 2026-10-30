@@ -46,6 +46,7 @@ import { romanOnlyChapters } from "./chapter-label";
 import { applyExactSpacing } from "./exact-spacing";
 import { materializeHeadingNumbers } from "./heading-numbers";
 import { detachWebDivs, divIndents } from "./web-divs";
+import { alignLegends, alignNoteLegends } from "./legend";
 import { verifyWithFreeze, findAppendixRegion, frozenParagraphs, restoreAppendix, type RestoreReport } from "./appendix-freeze";
 import { allParagraphs, changedHeadingNumbers, displayedLabels, shownHeadings } from "./numbering-sim";
 import { buildColumnLists } from "./column-lists";
@@ -438,6 +439,8 @@ export async function transformDocx(
     });
     // Catatan tabel tidak terpisah dari tabelnya / terpecah ke halaman lain.
     keepTableNotes(model, tableNotes);
+    // Catatan tabel "simbol = arti": tanda "=" sejajar.
+    const noteLegends = alignNoteLegends(model, tableNotes, rules.table().noteSize);
     if (config.normalizeTables) {
         const tl = applyTableLines(nodes, outline, tableLook, {
             lines: config.tableBorders === "minimal",
@@ -474,6 +477,15 @@ export async function transformDocx(
 
     const keywords = formatKeywords(nodes, outline);
     const labels = alignLabelLines(nodes, outline, { halfPts });
+    // Keterangan rumus ("Keterangan:" + "simbol = arti") & baris hipotesis: kolom "=" / ":" sejajar,
+    // rata margin kiri (bukan rumus yang ditengahkan, bukan alinea yang menjorok).
+    const legends = alignLegends(nodes, outline, {
+        halfPts, indent: Math.round(config.indent * 567), line: bodyLine, exact: config.lineRule === "exact",
+        skip: new Set<number>([...tableNotes.keys(), ...minor.ids]),
+    });
+    if (legends.blocks) notes.push(`${legends.blocks} keterangan rumus (${legends.lines} baris "simbol = arti") disejajarkan: rata margin kiri, tanda "=" satu kolom, baris lanjutan sejajar teks artinya.`);
+    if (legends.hypotheses) notes.push(`${legends.hypotheses} baris hipotesis (H0/H1) disejajarkan: teks sesudah titik dua kedua satu kolom.`);
+    if (noteLegends.lines) notes.push(`${noteLegends.lines} baris catatan tabel "simbol = arti" disejajarkan tanda "="-nya.`);
     if (labels.lines) notes.push(`${labels.lines} baris "Label : isi" (identitas, kop surat, singkatan) disejajarkan titik duanya.`);
     const appendixTitles = formatAppendixTitles(nodes, outline, { halfPts, exact: config.lineRule === "exact" });
     // Lampiran beku: perubahan judul lampiran dibatalkan di akhir, jadi tidak dilaporkan.
@@ -835,6 +847,7 @@ export async function transformDocx(
             ...headNums.regions,
             ...(columns?.regions ?? []),
             ...labels.regions,
+            ...legends.regions, ...noteLegends.regions,
             ...tpl.regions,
             ...front.regions,
             ...figGroups.regions,

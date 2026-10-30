@@ -58,6 +58,24 @@ export function isEmptyParagraph(p: ParaNode | { xml: string; text?: string }): 
   return !NONTEXT_CONTENT_RE.test(p.xml);
 }
 
+/**
+ * Elemen tingkat atas yang TIDAK tampil (bookmarkStart/End, permStart/End, proofErr, komentar …).
+ * Word sering menaruhnya DI ANTARA paragraf; bagi pembaca dua paragraf itu tetap bersebelahan.
+ */
+export function isInvisible(n: BlockNode | undefined): boolean {
+  return Boolean(n && n.kind === "raw" && !/<w:(?:r|t|drawing|pict|object|tbl|p)\b|<m:oMath/.test(n.xml));
+}
+
+/** Indeks blok TAMPAK berikutnya / sebelumnya (melewati elemen tak tampil), atau -1. */
+export function nextVisible(list: BlockNode[], i: number): number {
+  for (let k = i + 1; k < list.length; k++) if (!isInvisible(list[k])) return k;
+  return -1;
+}
+export function prevVisible(list: BlockNode[], i: number): number {
+  for (let k = i - 1; k >= 0; k--) if (!isInvisible(list[k])) return k;
+  return -1;
+}
+
 export type CellNode = { kind: "cell"; open: string; props: string | null; children: BlockNode[] };
 export type RowNode = { kind: "row"; open: string; props: string | null; cells: CellNode[]; extra: string[] };
 

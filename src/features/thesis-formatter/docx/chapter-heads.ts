@@ -10,7 +10,7 @@
  * Judul bab satu baris "BAB II. TINJAUAN PUSTAKA" dipecah oleh normalizeHeadings.
  */
 import { escapeXml, withProps, PPR_ORDER } from "./xml";
-import type { DocModel, ParaNode } from "./document-model";
+import { isInvisible, type DocModel, type ParaNode } from "./document-model";
 import { leadingRaw, removeLeading } from "./lists";
 import { paragraphLine, type VerifyRegion } from "./verify";
 
@@ -62,7 +62,7 @@ export function unifyChapterHeadings(model: DocModel): ChapterHeadReport {
   const nextText = (i: number) => {
     for (let k = i + 1; k < body.length && k <= i + 4; k++) {
       const n = body[k];
-      if (isEmpty(n)) continue;
+      if (isEmpty(n) || isInvisible(n)) continue;
       return n.kind === "paragraph" ? k : -1;
     }
     return -1;

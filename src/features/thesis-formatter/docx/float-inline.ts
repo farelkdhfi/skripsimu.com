@@ -16,7 +16,7 @@
  * tepat di atas keterangannya (bila ada) atau di dekat posisi tampilnya.
  */
 import { withProps, PPR_ORDER } from "./xml";
-import { flatten, parseBlocks, type BlockNode, type DocModel, type ParaNode } from "./document-model";
+import { flatten, nextVisible, parseBlocks, prevVisible, type BlockNode, type DocModel, type ParaNode } from "./document-model";
 import { captionKind, scanStructure, type Zone } from "../structure/roles";
 import { inlineOf, maxId } from "./figure-split";
 import { nearFloatingShape, tableClass } from "./layout-groups";
@@ -150,7 +150,7 @@ export function inlineFloatingImages(model: DocModel): { inlined: number; moved:
 
         // Gambar yang ditumpuki bentuk (panah, label) di paragraf ini/sebelah: satu susunan.
         const li = list.indexOf(p);
-        const neighbors = [list[li - 1], list[li + 1]].filter((n): n is ParaNode => n?.kind === "paragraph");
+        const neighbors = [list[prevVisible(list, li)], list[nextVisible(list, li)]].filter((n): n is ParaNode => n?.kind === "paragraph");
         // Kotak teks/shape melayang dalam ≤ 3 paragraf (mis. keterangan "Ilustrasi 1" berupa kotak
         // teks yang posisinya relatif ke paragraf pengganjal di bawah foto) = satu susunan.
         const composite = hasShapes(p) || neighbors.some(hasShapes) || nearFloatingShape(list, li, 3);

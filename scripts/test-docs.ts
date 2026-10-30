@@ -206,6 +206,35 @@ async function hardChecks(zip: JSZip, docXml: string): Promise<string[]> {
             break;
         }
     }
+    // 5) Blok catatan tabel (baris berhuruf kecil tepat di bawah tabel): tidak ada jarak di tengah,
+    //    dan tidak memuat judul isi lain ("Kaidah Keputusan:").
+    let gapFail = "";
+    let alienFail = "";
+    for (const m of docXml.matchAll(/<\/w:tbl>((?:(?:<w:bookmark(?:Start|End)\b[^>]*\/>)|<w:p\b[^>]*>[\s\S]*?<\/w:p>)+)/g)) {
+        const before = docXml.slice(0, m.index! + "</w:tbl>".length);
+        if (refAt !== -1 && m.index! > refAt) continue;
+        if ((before.match(/<w:tbl>/g) ?? []).length - (before.match(/<\/w:tbl>/g) ?? []).length > 0) continue;
+        const ps = [...m[1].matchAll(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g)].map((x) => x[0]);
+        const block: string[] = [];
+        for (const p of ps) {
+            const sz = Number(/<w:sz w:val="(\d+)"/.exec(p)?.[1] ?? 0);
+            if (!plain(p).trim() || !sz || sz >= 24) break;
+            block.push(p);
+        }
+        if (block.length < 2) continue;
+        const sp = (p: string, k: "before" | "after") => Number(new RegExp(`<w:spacing\\b[^>]*w:${k}="(\\d+)"`).exec(p)?.[1] ?? 0);
+        if (!gapFail && (block.slice(1).some((p) => sp(p, "before") > 0) || block.slice(0, -1).some((p) => sp(p, "after") > 0))) {
+            gapFail = `ada jarak kosong di tengah blok catatan tabel, mis. sekitar "${plain(block[0]).slice(0, 30)}"`;
+        }
+        const alien = block.find((p) => /:\s*$/.test(plain(p).trim()) && !/^\s*(keterangan|ket\.?|sumber|source|catatan|note)/i.test(plain(p)));
+        if (alien && !alienFail) alienFail = `catatan tabel memuat judul isi lain: "${plain(alien).slice(0, 40)}"`;
+    }
+    if (gapFail) fails.push(gapFail);
+    if (alienFail) fails.push(alienFail);
+    // 6) Baris keterangan rumus "simbol ⇥ = arti" tidak ditengahkan seperti rumus.
+    const centeredLegend = paras.filter((x) => /<w:jc w:val="center"\/>/.test(/<w:pPr>[\s\S]*?<\/w:pPr>/.exec(x)?.[0] ?? "") &&
+        /^\s*\S{1,12}\s*\t\s*=\s*\S/.test(plain(x)) && !/<w:tbl/.test(x));
+    if (centeredLegend.length) fails.push(`${centeredLegend.length} baris keterangan rumus ("simbol = arti") ditengahkan, mis. "${plain(centeredLegend[0]).slice(0, 40)}"`);
 
     return fails;
 }

@@ -10,7 +10,7 @@
 import type JSZip from "jszip";
 import { withProps, PPR_ORDER } from "./xml";
 import type { DocModel, ParaNode, TableNode } from "./document-model";
-import { isEmptyParagraph } from "./document-model";
+import { isEmptyParagraph, nextVisible, prevVisible } from "./document-model";
 import type { Outline } from "../structure/outline";
 import { isHeadingRole, startsNewPage, type Role } from "../structure/roles";
 import { paragraphLine, type VerifyRegion } from "./verify";
@@ -27,9 +27,17 @@ const decodeXml = (s: string) =>
 const fullText = (xml: string) =>
   [...xml.matchAll(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g)].map((m) => decodeXml(m[1])).join("");
 
-/** Baris rumus: ada "=", pendek, hampir tanpa kata biasa ("Y = α + β1·X1 + ε"). */
-const isFormula = (t: string) =>
-  /=/.test(t) && t.length <= 160 && !/\t/.test(t) && (t.match(/[A-Za-z\u00C0-\u024F]{4,}/g) ?? []).length <= 2;
+/**
+ * Baris rumus: ada "=", pendek, hampir tanpa kata biasa ("Y = α + β1·X1 + ε"). Diperiksa pada
+ * teks ASLI (dengan tab): baris bertab ("i ⇥ = Perlakuan ke-i") dan baris "simbol = Arti" adalah
+ * keterangan rumus, bukan rumus.
+ */
+const isFormula = (raw: string) => {
+  if (/\t/.test(raw)) return false;
+  const t = raw.replace(/\s+/g, " ").trim();
+  if (/^\S{1,12}\s*=\s+[A-Z][a-z]{3,}/.test(t)) return false;
+  return /=/.test(t) && t.length <= 160 && (t.match(/[A-Za-z\u00C0-\u024F]{4,}/g) ?? []).length <= 2;
+};
 
 export type FlowReport = {
   breaks: number;
@@ -97,8 +105,10 @@ export function cleanFlow(
     if (!isBlank(body[k])) continue;
     let e = k;
     while (e + 1 < body.length && isBlank(body[e + 1])) e++;
-    const prev = body[k - 1];
-    const next = body[e + 1];
+    // Tetangga yang TAMPAK (bookmark di antaranya tidak dihitung): mis. dua tabel yang hanya
+    // dipisah baris kosong + bookmark tetap harus dipisah.
+    const prev = body[prevVisible(body, k)];
+    const next = body[nextVisible(body, e)];
     const zone = zoneOf.get((body[k] as ParaNode).id);
 
     let from = -1;
@@ -123,7 +133,7 @@ export function cleanFlow(
     const pPr = /<w:pPr>[\s\S]*?<\/w:pPr>/.exec(n.xml)?.[0] ?? "";
     const t = n.text.replace(/\s+/g, " ").trim();
 
-    if (isFormula(t)) {
+    if (isFormula(n.text)) {
       const indented = /<w:ind\b[^>]*w:(?:firstLine|left|start)="[1-9]/.test(pPr);
       if (!/<w:jc w:val="center"/.test(pPr) || indented) {
         n.xml = withProps(n.xml, "w:pPr", {
