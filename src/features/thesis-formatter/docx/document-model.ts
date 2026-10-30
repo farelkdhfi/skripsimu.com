@@ -40,6 +40,24 @@ export type ParaNode = {
   allBold: boolean;
 };
 
+/**
+ * Isi paragraf yang TIDAK berupa teks biasa tetapi tetap isi: rumus (m:oMath), gambar/objek/kotak
+ * teks, simbol (w:sym), field, bookmark (tujuan tautan Daftar Isi), rujukan catatan kaki/komentar,
+ * kontrol isian (w:sdt), penanda section & pindah halaman/kolom.
+ */
+const NONTEXT_CONTENT_RE = /<m:oMath\b|<m:oMathPara\b|<w:drawing\b|<w:pict\b|<w:object\b|<mc:AlternateContent\b|<w:sym\b|<w:fldChar\b|<w:fldSimple\b|<w:instrText\b|<w:bookmarkStart\b|<w:footnoteReference\b|<w:endnoteReference\b|<w:commentReference\b|<w:commentRangeStart\b|<w:sdt\b|<w:sectPr\b|<w:br\b[^>]*w:type="(?:page|column)"|<w:ruby\b|<v:shape\b|<w:control\b/;
+
+/**
+ * SATU definisi "paragraf kosong" untuk semua modul: tidak ada teks yang tampil (selain spasi/tab/
+ * ganti baris) DAN tidak ada isi bukan-teks di atas. Paragraf kosong boleh dibuang/diringkas;
+ * selebihnya tidak. (Sebelumnya tiap modul punya definisi sendiri dan sebagian lupa rumus.)
+ */
+export function isEmptyParagraph(p: ParaNode | { xml: string; text?: string }): boolean {
+  const text = p.text ?? textOf(p.xml);
+  if (text.replace(/[\s\u00a0\u200b]/g, "")) return false;
+  return !NONTEXT_CONTENT_RE.test(p.xml);
+}
+
 export type CellNode = { kind: "cell"; open: string; props: string | null; children: BlockNode[] };
 export type RowNode = { kind: "row"; open: string; props: string | null; cells: CellNode[]; extra: string[] };
 

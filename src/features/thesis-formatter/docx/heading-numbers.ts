@@ -4,28 +4,22 @@
  * otomatisnya dimatikan. Setelah itu subbab dikenali seperti subbab ketikan, nomornya ikut
  * diperiksa, dan Daftar Isi memuatnya dengan benar.
  *
- * Nomor dihitung dari konteks bab (bukan dari penghitung numbering Word, yang sering
- * tercampur dengan daftar lain). Hanya penomoran desimal bertingkat ("%1.%2", "%1.%2.%3")
- * yang ditulis ulang. Dijalankan setelah unifyChapterHeadings dan sebelum outline.
+ * Nomor yang ditulis = nomor yang ditampilkan Word di dokumen asli (numbering-sim). Hanya
+ * penomoran desimal bertingkat ("%1.%2", "%1.%2.%3") yang ditulis ulang, dan per daftar Word
+ * utuh-atau-tidak-sama-sekali. Dijalankan setelah unifyChapterHeadings dan sebelum outline.
  */
 import type JSZip from "jszip";
 import { escapeXml, withProps, PPR_ORDER } from "./xml";
 import type { ParaNode, TableNode } from "./document-model";
 import { leadingRaw } from "./lists";
 import { paragraphLine, type VerifyRegion } from "./verify";
+import { createNumberingSim, type Displayed } from "./numbering-sim";
 
-const HEAD_STYLE_RE = /^(?:heading|judul)\s*([1-3])$/i;
-const TYPED_RE = /^\s*(\d+(?:\.\d+){1,3})[.)]?\s/;
+const HEAD_STYLE_RE = /^(?:heading|judul)\s*([1-6])$/i;
+const TYPED_RE = /^\s*(\d+(?:\.\d+){1,4})[.)]?\s/;
 const CHAPTER_RE = /^\s*(?:bab|chapter)\s+([ivxlcdm]+|\d+)\b/i;
-const BARE_RE = /^\s*([IVX]{1,5})\b/;
-
-function fromRoman(s: string): number {
-  const v: Record<string, number> = { i: 1, v: 5, x: 10, l: 50, c: 100, d: 500, m: 1000 };
-  const a = s.toLowerCase();
-  let t = 0;
-  for (let k = 0; k < a.length; k++) { const c = v[a[k]] ?? 0; const n = v[a[k + 1]] ?? 0; t += c < n ? -c : c; }
-  return t;
-}
+/** Teks nomor bertingkat bertitik, bagian berupa placeholder (%1) atau angka tetap (1). */
+const DOTTED_LVL_RE = /^(?:\d+|%\d)(?:\.(?:\d+|%\d))+\.?$/;
 
 type StyleInfo = { numId?: string; ilvl?: number; basedOn?: string; level?: number };
 
@@ -72,8 +66,14 @@ export async function materializeHeadingNumbers(
   nodes: (ParaNode | TableNode)[],
   chapterIds: Set<number>,
   stylesXml: string,
-): Promise<{ count: number; regions: VerifyRegion[] }> {
-  const out = { count: 0, regions: [] as VerifyRegion[] };
+  /** Nomor yang DITAMPILKAN Word di dokumen asli (displayedLabels pada model sebelum diubah). */
+  displayed: Map<ParaNode, Displayed>,
+  /** Semua paragraf yang masih ada di model sekarang (termasuk di tabel). */
+  present: ParaNode[],
+  /** Paragraf lampiran yang dibekukan: tidak boleh diubah, jadi daftarnya juga tidak diubah. */
+  frozen: Set<ParaNode> = new Set(),
+): Promise<{ count: number; skippedLists: number; regions: VerifyRegion[]; written: Set<ParaNode> }> {
+  const out = { count: 0, skippedLists: 0, regions: [] as VerifyRegion[], written: new Set<ParaNode>() };
   const numXml = await zip.file("word/numbering.xml")?.async("string");
   if (!numXml) return out;
   const styles = readStyles(stylesXml);
@@ -89,49 +89,65 @@ export async function materializeHeadingNumbers(
     return undefined;
   };
 
-  let chapter = 0;
-  let sec = 0;
-  let sub = 0;
+  // Nomor yang ditulis = nomor yang DITAMPILKAN Word di dokumen asli (simulasi numbering.xml),
+  // bukan hitungan ulang dari konteks bab: urutan XML tidak selalu sama dengan urutan tampil
+  // (mis. hasil konversi PDF yang memakai kolom: "5.1 Kesimpulan" ada SEBELUM judul "BAB V").
+  //
+  // Satu daftar Word (abstractNum) dipakai bersama oleh beberapa tingkat (Heading 2 "2.1",
+  // Heading 3 "2.1.4", Heading 4 "2.1.4.1") dan Word menghitung nomor tingkat bawah dari penghitung
+  // tingkat atasnya. Jadi SATU daftar diubah UTUH (semua paragrafnya jadi nomor ketikan) atau TIDAK
+  // SAMA SEKALI — mengubah sebagian membuat nomor paragraf lain di daftar itu berubah.
+  void chapterIds;
+  type Cand = { n: ParaNode; t: string; num: string; abs: string };
+  const cands: Cand[] = [];
+  const bad = new Set<string>();
   for (const n of nodes) {
     if (n.kind !== "paragraph") continue;
+    const d = displayed.get(n);
+    if (!d) continue;
     const t = n.text.trim();
-    if (!t) continue;
     const pPr = /<w:pPr>[\s\S]*?<\/w:pPr>/.exec(n.xml)?.[0] ?? "";
     const directOl = /<w:outlineLvl w:val="(\d)"/.exec(pPr)?.[1];
     const level = directOl !== undefined ? Number(directOl) + 1 : fromStyle(n.styleId, "level");
-
-    // Bab: "BAB II …", atau romawi saja pada judul bab (Heading 1 / hasil unifyChapterHeadings).
-    const cm = CHAPTER_RE.exec(t);
-    const bm = !cm && (chapterIds.has(n.id) || level === 1) ? BARE_RE.exec(t) : null;
-    if (cm || bm) {
-      const v = cm ? (/^\d+$/.test(cm[1]) ? Number(cm[1]) : fromRoman(cm[1])) : fromRoman(bm![1]);
-      if (v > 0 && v < 40) { chapter = v; sec = 0; sub = 0; }
-      continue;
+    const lvl = lvlOf(d.numId, d.ilvl);
+    // Penomoran desimal bertingkat bertitik: "%1.%2", "%1.%2.%3.%4", juga dengan awalan bab tetap ("2.%1").
+    const dotted = Boolean(lvl) && /^decimal/.test(lvl!.fmt) && DOTTED_LVL_RE.test(lvl!.text.trim()) && /%\d/.test(lvl!.text);
+    if (!dotted) continue;                       // daftar biasa (a., 1), •) — bukan urusan modul ini
+    const label = d.label.trim().replace(/\.$/, "");
+    const headingLike = t.length > 0 && t.length <= 150 && !/[.!?;:,]$/.test(t);
+    const isHeading = (level !== undefined && level >= 2 && level <= 6) || headingLike;
+    const ok = isHeading && !CHAPTER_RE.test(t) && !TYPED_RE.test(t) && /^\d+(?:\.\d+){1,4}$/.test(label);
+    if (!ok || frozen.has(n)) { bad.add(d.abs); continue; }
+    cands.push({ n, t, num: label, abs: d.abs });
+  }
+  // Daftar yang sama kadang juga dipakai paragraf lain (mis. butir "1)" di tingkat bawah). Dicoba:
+  // nomor otomatis judul dimatikan → nomor yang tampil di SEMUA paragraf bernomor lain disimulasikan
+  // ulang; daftar diterima hanya bila tidak ada satu pun nomor lain yang berubah.
+  const simLabels = (skip: Set<ParaNode>) => {
+    const sim = createNumberingSim(numXml, stylesXml);
+    const m = new Map<ParaNode, string>();
+    for (const p of present) {
+      if (skip.has(p)) continue;
+      const r = sim.next(p.xml, p.styleId);
+      if (r) m.set(p, r.label);
     }
-    if (level !== 2 && level !== 3) continue;
-
-    // Subbab bernomor ketikan: penghitung disamakan dengannya.
-    const typed = TYPED_RE.exec(t);
-    if (typed) {
-      const nums = typed[1].split(".").map(Number);
-      sec = nums[1] ?? sec;
-      sub = nums.length >= 3 ? nums[2] : 0;
-      continue;
-    }
-
-    // Penomoran otomatis Word (langsung di paragraf atau dari style-nya).
-    const np = /<w:numPr>([\s\S]*?)<\/w:numPr>/.exec(pPr)?.[1];
-    const numId = np ? /<w:numId w:val="(\d+)"/.exec(np)?.[1] : fromStyle(n.styleId, "numId");
-    if (!numId || numId === "0" || !chapter) continue;
-    const il = np ? /<w:ilvl w:val="(\d+)"/.exec(np)?.[1] : undefined;
-    const ilvl = il !== undefined ? Number(il) : fromStyle(n.styleId, "ilvl") ?? 0;
-    const lvl = lvlOf(numId, ilvl);
-    if (!lvl || !/^decimal/.test(lvl.fmt) || !/%\d\.%\d/.test(lvl.text)) continue;
-
-    let num: string;
-    if (level === 2) { sec++; sub = 0; num = `${chapter}.${sec}`; }
-    else { sub++; num = `${chapter}.${Math.max(1, sec)}.${sub}`; }
-
+    return m;
+  };
+  const baseline = simLabels(new Set());
+  let accepted = new Set<ParaNode>();
+  for (const abs of new Set(cands.map((c) => c.abs))) {
+    if (bad.has(abs)) continue;
+    const trial = new Set([...accepted, ...cands.filter((c) => c.abs === abs).map((c) => c.n)]);
+    const after = simLabels(trial);
+    const changed = [...baseline].find(([p, l]) => !trial.has(p) && after.get(p) !== l);
+    if (changed) {
+     
+      bad.add(abs);
+    } else accepted = trial;
+  }
+  out.skippedLists = new Set(cands.filter((c) => bad.has(c.abs)).map((c) => c.abs)).size;
+  for (const { n, t, num, abs } of cands) {
+    if (bad.has(abs)) continue;
     const before = paragraphLine(n.xml);
     const rPr = /<w:r(?:\s[^>]*)?>\s*(<w:rPr>[\s\S]*?<\/w:rPr>)/.exec(n.xml)?.[1] ?? "";
     const startsTab = /^[ \u00a0]*\t/.test(leadingRaw(n.xml, 4));
@@ -144,6 +160,7 @@ export async function materializeHeadingNumbers(
     n.text = `${num}\t${t}`;
     out.regions.push({ beforeLines: [before].filter(Boolean), afterLines: [paragraphLine(n.xml)].filter(Boolean), beforeText: "", afterText: "" });
     out.count++;
+    out.written.add(n);
   }
   return out;
 }

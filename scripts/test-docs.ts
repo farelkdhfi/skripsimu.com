@@ -8,6 +8,7 @@
  *
  * Tanpa AI, jadi hasilnya deterministik. Hasil format disimpan di test-docs/__out__/.
  */
+import { useNodeIO } from "../src/features/thesis-formatter/front/node";
 import { readFile, writeFile, mkdir, readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
@@ -17,7 +18,6 @@ import { configForPreset } from "../src/features/thesis-formatter/schemas/format
 import { flatten, parseDocument, type ParaNode, type TableNode } from "../src/features/thesis-formatter/docx/document-model";
 import { fingerprint } from "../src/features/thesis-formatter/docx/verify";
 import { countAutoSpacing } from "../src/features/thesis-formatter/docx/autospacing";
-import { useNodeIO } from "../src/features/thesis-formatter/front/node";
 useNodeIO();
 
 const ROOT = path.resolve("test-docs");
@@ -28,7 +28,12 @@ const UPDATE = args.includes("--update");
 const TRACE = args.includes("--trace");
 const FILTER = args.filter((a) => !a.startsWith("--")).map((a) => a.toLowerCase());
 
-type Case = { preset?: string; config?: Record<string, unknown> };
+/**
+ * `frontAI`: berkas JSON (di test-docs/) berisi jawaban AI bagian depan yang diputar ulang — untuk
+ * menguji jalur AI tanpa memanggil AI (mis. jawaban AI sungguhan yang disalin dari log, atau
+ * jawaban yang sengaja salah).
+ */
+type Case = { preset?: string; config?: Record<string, unknown>; frontAI?: string };
 
 /* ------------------------------------------------------------------ */
 /* Pembacaan XML ringkas                                                */
@@ -172,6 +177,36 @@ async function hardChecks(zip: JSZip, docXml: string): Promise<string[]> {
     const stray = [...docXml.matchAll(/<w:t(?:\s[^>]*)?>\s*(period|space|undefined|null|NaN|\[object Object\])\s*<\/w:t>/g)];
     if (stray.length) fails.push(`${stray.length} run berisi teks nyasar "${stray[0][1]}" (nilai config/variabel tertulis ke dokumen)`);
 
+    // Aturan umum (semua naskah):
+    // 1) Judul bernomor empat tingkat ("2.1.4.1 …") bukan subbab: tidak ber-style Heading 1–3.
+    const paras = [...docXml.matchAll(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g)].map((m) => m[0]);
+    const plain = (x: string) => [...x.matchAll(/<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>|<w:tab\/>/g)].map((m) => m[1] ?? "\t").join("");
+    const deep = paras.filter((x) => /^\s*\d+\.\d+\.\d+\.\d+\.?[\t ]/.test(plain(x)) && /<w:pStyle w:val="(?:Heading|heading)[1-3]"/.test(x));
+    if (deep.length) fails.push(`${deep.length} judul empat tingkat ber-style Heading 1–3, mis. "${plain(deep[0]).slice(0, 40)}"`);
+    // 2) Daftar Isi (entri yang menunjuk ke judul lewat PAGEREF) paling dalam tiga tingkat.
+    const tocDeep = paras.filter((x) => /PAGEREF _(?:Fmt|Toc)/.test(x) && /^\s*\d+\.\d+\.\d+\.\d+\.?\t/.test(plain(x)));
+    if (tocDeep.length) fails.push(`Daftar Isi memuat ${tocDeep.length} judul tingkat 4, mis. "${plain(tocDeep[0]).slice(0, 40)}"`);
+    // 3) Paragraf ber-indentasi baku formatter tidak boleh masih menunjuk ke kotak HTML bermargin.
+    const ws = zip.file("word/webSettings.xml") ? await zip.file("word/webSettings.xml")!.async("string") : "";
+    if (/<w:marLeft w:val="[1-9]/.test(ws)) {
+        const stuck = paras.filter((x) => /<w:divId\b/.test(x) && /<w:ind w:left="720" w:hanging="720"\/>/.test(x));
+        if (stuck.length) fails.push(`${stuck.length} paragraf (mis. Daftar Pustaka) berindentasi baku masih menunjuk ke kotak HTML bermargin → bergeser di Word`);
+    }
+    // 4) Catatan tabel ("Keterangan", "Sumber") menempel ke tabelnya: paragraf tepat setelah tabel
+    //    yang berupa catatan harus keepNext bila masih ada catatan sesudahnya.
+    //    Hanya di badan teks sebelum lampiran (lampiran beku & isi tabel tata letak tidak diubah).
+    const refAt = docXml.search(/>DAFTAR PUSTAKA<\/w:t>(?![\s\S]*>DAFTAR PUSTAKA<\/w:t>)/);
+    for (const m of docXml.matchAll(/<\/w:tbl>((?:<w:p\b[^>]*>[\s\S]*?<\/w:p>){2})/g)) {
+        const before = docXml.slice(0, m.index! + "</w:tbl>".length);
+        if (refAt !== -1 && m.index! > refAt) continue;
+        if ((before.match(/<w:tbl>/g) ?? []).length - (before.match(/<\/w:tbl>/g) ?? []).length > 0) continue;
+        const ps = [...m[1].matchAll(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g)].map((x) => x[0]);
+        if (/^\s*Keterangan\s*:?\s*$/.test(plain(ps[0])) && plain(ps[1]).trim() && !/<w:keepNext\/>/.test(ps[0])) {
+            fails.push(`"Keterangan" tabel tidak menempel ke baris catatan berikutnya (bisa terpisah halaman)`);
+            break;
+        }
+    }
+
     return fails;
 }
 
@@ -270,7 +305,13 @@ async function main() {
         try {
             const input = await readFile(path.join(ROOT, file));
             originalXml = (await (await JSZip.loadAsync(input)).file("word/document.xml")?.async("string")) ?? "";
-            const result = await transformDocx(input, config, TRACE ? { trace: (name, xml) => stages.push({ name, xml }) } : {});
+            const frontAI = c.frontAI
+                ? async () => JSON.parse(await readFile(path.join(ROOT, c.frontAI!), "utf8"))
+                : undefined;
+            const result = await transformDocx(input, config, {
+                ...(TRACE ? { trace: (name: string, xml: string) => stages.push({ name, xml }) } : {}),
+                frontAI,
+            });
             const outFile = path.join(OUT, `${base}-FORMATTED-${preset}.docx`);
             try {
                 await writeFile(outFile, result.buffer);

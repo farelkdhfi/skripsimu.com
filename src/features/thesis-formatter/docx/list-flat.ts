@@ -18,13 +18,18 @@ import type { Outline } from "../structure/outline";
 import type { ListLayout } from "./lists";
 import { isHeadingRole, type Role } from "../structure/roles";
 import type JSZip from "jszip";
+import { leadingRaw } from "./lists";
+import { textStop } from "./heading-tabs";
+
+/** Nomor bertingkat ketikan di awal paragraf, diikuti tab ("2.1.4.1⇥"). */
+const NUM_LEAD_RE = /^[ \u00a0]*(\d+(?:\.\d+)+)\.?[ \u00a0]*\t/;
 
 export function flattenLists(
     nodes: (ParaNode | TableNode)[],
     outline: Outline,
     layout: ListLayout,
     minorIds: Set<number>,
-    opts: { indent: number },
+    opts: { indent: number; halfPts?: number },
 ): number {
     let count = 0;
     const ind = opts.indent;
@@ -40,10 +45,13 @@ export function flattenLists(
             (n.hasNumbering && !isHeadingRole(it.role as Role));
 
         if (marked) {
-            // Penanda di margin, teks & baris lanjutan di indentasi alinea.
+            // Penanda di margin, teks & baris lanjutan di indentasi alinea — atau lebih jauh bila
+            // penandanya nomor bertingkat yang lebih lebar dari indentasi ("2.1.4.1").
+            const num = NUM_LEAD_RE.exec(leadingRaw(n.xml, 40))?.[1];
+            const pos = num ? textStop(num, ind, opts.halfPts ?? 24) : ind;
             n.xml = withProps(n.xml, "w:pPr", {
-                "w:tabs": `<w:tabs><w:tab w:val="left" w:pos="${ind}"/></w:tabs>`,
-                "w:ind": `<w:ind w:left="${ind}" w:right="0" w:hanging="${ind}"/>`,
+                "w:tabs": `<w:tabs><w:tab w:val="left" w:pos="${pos}"/></w:tabs>`,
+                "w:ind": `<w:ind w:left="${pos}" w:right="0" w:hanging="${pos}"/>`,
             }, PPR_ORDER);
             count++;
             return;

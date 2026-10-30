@@ -15,7 +15,7 @@ import {
     isLandscape, patchCompat, patchSectPr, patchStyles, type SectionPlan,
 } from "./package-parts";
 import { fitDrawings, type ImageReport } from "./images";
-import { detectTableNotes, formatTableNotes, spaceAfterTables, keepTablesTogether } from "./tables";
+import { detectTableNotes, formatTableNotes, spaceAfterTables, keepTablesTogether, keepTableNotes } from "./tables";
 import { formatLists, applyListLayout } from "./lists";
 import { buildTocFields, type TocReport } from "./toc";
 import { buildOutline, outlineStats, type Outline } from "../structure/outline";
@@ -45,8 +45,12 @@ import { realignStrayProse } from "./stray-prose";
 import { romanOnlyChapters } from "./chapter-label";
 import { applyExactSpacing } from "./exact-spacing";
 import { materializeHeadingNumbers } from "./heading-numbers";
+import { detachWebDivs, divIndents } from "./web-divs";
+import { verifyWithFreeze, findAppendixRegion, frozenParagraphs, restoreAppendix, type RestoreReport } from "./appendix-freeze";
+import { allParagraphs, changedHeadingNumbers, displayedLabels, shownHeadings } from "./numbering-sim";
 import { buildColumnLists } from "./column-lists";
 import { splitFigureCaptions } from "./figure-split";
+import { normalizeFigureGroups } from "./figure-groups";
 import { alignHeadingTabs } from "./heading-tabs";
 import { formatAppendixTitles } from "./appendix-titles";
 import { openedHeadings, restoreOpeners, type PageInfo } from "./page-openers";
@@ -256,6 +260,15 @@ export async function transformDocx(
     const before = fingerprint(originalXml);
 
     const model = parseDocument(originalXml);
+    // Nomor otomatis yang DITAMPILKAN Word di dokumen asli (sebelum apa pun diubah).
+    const numbering0 = (await zip.file("word/numbering.xml")?.async("string")) ?? "";
+    const stylesXml = await zip.file("word/styles.xml")?.async("string");
+    const shownBefore = displayedLabels(model, numbering0, stylesXml ?? "");
+    const headingsBefore = shownHeadings(shownBefore.map);
+    // Lampiran (sesudah Daftar Pustaka s.d. akhir) dibekukan: dikembalikan ke XML asli di akhir.
+    const freeze = findAppendixRegion(model);
+    const divInd0 = divIndents(model);
+    const frozenParas = frozenParagraphs(freeze.frozen);
     // Judul bab → satu paragraf dua baris, sebelum outline.
     const preNodes = flatten(model.body);
     const aiOf = new Map<ParaNode | TableNode, Role | null>(preNodes.map((n, i) => [n, opts.aiRoles?.[i] ?? null]));
@@ -263,6 +276,9 @@ export async function transformDocx(
     // yang tidak dilihat modul lain, jadi tata letaknya tidak diubah lagi.
     const front = await buildFrontMatter(zip, model, config, opts.frontFields ?? {}, opts.frontAI);
     const chapters = unifyChapterHeadings(model);
+    // Foto melayang + keterangan berupa kotak teks melayang (susunan buatan tangan) → foto inline +
+    // keterangan paragraf biasa. Hanya bila susunannya pasti; selebihnya dibiarkan.
+    const figGroups = normalizeFigureGroups(model);
     // Gambar + keterangannya dalam satu paragraf → dua paragraf (keterangannya jadi dikenali).
     const figSplit = splitFigureCaptions(model);
     // Lembar pernyataan di dalam tabel bingkai dikeluarkan dari tabelnya (teks tetap), kecuali preset "keep".
@@ -272,12 +288,10 @@ export async function transformDocx(
     // Tabel 1×1 pembungkus beberapa paragraf = bingkai, bukan tabel data.
     const frameTables = findFrameTables(model);
     const nodes = flatten(model.body);
-    const stylesXml = await zip.file("word/styles.xml")?.async("string");
     // Ketebalan asli dicatat sebelum modul lain mengubah format (judul daftar & tingkat 4 mengikutinya).
-    const numbering0 = (await zip.file("word/numbering.xml")?.async("string")) ?? "";
     const boldBefore = originalBold(nodes, numbering0, styleBoldOf(stylesXml ?? ""));
     // Nomor subbab otomatis Word (Heading 2 + "%1.%2") → nomor ketikan, sebelum peran dibaca.
-    const headNums = await materializeHeadingNumbers(zip, nodes, chapters.chapterIds, stylesXml ?? "");
+    const headNums = await materializeHeadingNumbers(zip, nodes, chapters.chapterIds, stylesXml ?? "", shownBefore.map, allParagraphs(model), frozenParas);
     if (stylesXml) markStyleNumbering(nodes, stylesXml);
     const styleLook = stylesXml ? readStyleLook(stylesXml) : undefined;
     const aiRoles = nodes.map((n) => aiOf.get(n) ?? null);
@@ -306,6 +320,9 @@ export async function transformDocx(
     if (!front.built && front.reason) notes.push(`Template bagian depan tidak dipakai: ${front.reason} Bagian depan dirapikan dengan cara lama — periksa sampul s.d. abstrak secara manual.`);
     if (chapters.merged || chapters.split) notes.push(`${chapters.merged + chapters.split} judul bab diseragamkan menjadi satu judul dua baris (nomor bab di atas, judul bab di bawah).`);
     if (headNums.count) notes.push(`${headNums.count} nomor subbab otomatis Word (mis. "1.1") diubah menjadi nomor ketikan agar tidak terbaca sebagai daftar bernomor.`);
+    if (figGroups.converted) notes.push(`${figGroups.converted} gambar dengan keterangan berupa kotak teks melayang dirapikan: gambar dijadikan "In Line with Text" dan keterangannya menjadi paragraf biasa di bawah gambar (tidak bisa tergeser/terpotong lagi); paragraf kosong pengganjal dibuang.`);
+    if (figGroups.hidden.length) notes.push(`Teks tersembunyi di dalam kotak keterangan (tidak terlihat di naskah asli karena kotaknya hanya memuat satu baris) TIDAK dimunculkan: ${figGroups.hidden.slice(0, 5).map((h) => `"${h.text.slice(0, 70)}" (di kotak "${h.caption.slice(0, 40)}")`).join("; ")}. Periksa apakah memang tidak diperlukan.`);
+    if (figGroups.skipped) notes.push(`${figGroups.skipped} gambar berketerangan kotak teks tidak dirapikan karena isi kotaknya tidak bisa dipastikan; dibiarkan apa adanya.`);
     if (figSplit) notes.push(`${figSplit} gambar yang keterangannya menyatu dalam satu paragraf dipisah: gambar di atas, keterangan di bawahnya (masuk daftar gambar/ilustrasi).`);
     if (floats.inlined) notes.push(`${floats.inlined} gambar melayang (bebas digeser) dijadikan "In Line with Text"${floats.moved ? `; ${floats.moved} di antaranya dikeluarkan dari paragraf teks ke paragrafnya sendiri, di atas keterangannya` : ""}. Tanda tangan, materai, logo sampul, dan bentuk/kotak tetap melayang.`);
     if (unwrapped?.count) notes.push("Lembar pernyataan yang ditulis di dalam tabel bingkai dikeluarkan dari tabelnya (teks tidak berubah) agar diformat seperti halaman lain.");
@@ -363,9 +380,10 @@ export async function transformDocx(
         styleLook,
     });
 
+    if (report.complexTablesSkipped) notes.push(`${report.complexTablesSkipped} tabel tata letak berisi objek melayang (mis. gambar dengan keterangan berupa kotak teks) dibiarkan apa adanya: posisi gambar & keterangannya saling bergantung, jadi tidak diubah sebagian (hanya dijaga agar tidak terbelah ke dua halaman). Periksa tampilannya di Word.`);
     applyListLayout(nodes, listRep.layout);
     trace("02 format paragraf + daftar");
-    const minorRegions = minor.apply({ rep: report, font: config.fontFamily, halfPts, line: bodyLine });
+    const minorRegions = minor.apply({ rep: report, font: config.fontFamily, halfPts, line: bodyLine, indent: Math.round(config.indent * 567) });
     if (minor.count) notes.push(`${minor.count} judul tingkat 4 ("a. …", "1) …", Heading 4) diseragamkan: penanda di margin kiri, tebal, menempel ke paragraf di bawahnya.`);
 
     const flow = cleanFlow(model, nodes, outline, keepOut);
@@ -375,7 +393,7 @@ export async function transformDocx(
     if (strayProse) notes.push(`${strayProse} kalimat isi yang rata tengah/kanan dikembalikan menjadi alinea biasa.`);
     const continuations = unindentContinuations(nodes, outline, minor.ids);
     if (config.listLayout === "flat") {
-        const flat = flattenLists(nodes, outline, listRep.layout, minor.ids, { indent: Math.round(config.indent * 567) });
+        const flat = flattenLists(nodes, outline, listRep.layout, minor.ids, { indent: Math.round(config.indent * 567), halfPts });
         if (flat) notes.push(`${flat} butir daftar & judul berpenanda disejajarkan: penanda di margin kiri, teks mulai di indentasi alinea; paragraf di bawahnya menjadi paragraf biasa.`);
     }
     const markers = await alignListMarkers(zip, nodes, outline);
@@ -391,7 +409,7 @@ export async function transformDocx(
     /* -------- judul bab/subbab: nomor & huruf -------- */
 
     trace("03 alur (spasi, baris kosong, rumus)");
-    const headings = normalizeHeadings(nodes, outline, rules, report, { titleCase: true });
+    const headings = normalizeHeadings(nodes, outline, rules, report, { titleCase: true, locked: headNums.written });
     trace("04 judul subbab");
     if (headings.chaptersSplit) notes.push(`${headings.chaptersSplit} judul bab satu baris diseragamkan menjadi dua baris (nomor bab lalu judulnya).`);
 
@@ -418,6 +436,8 @@ export async function transformDocx(
         pageHeight: page.heightTwips - page.margin.top - page.margin.bottom,
         halfPts: rules.table().fontSize,
     });
+    // Catatan tabel tidak terpisah dari tabelnya / terpecah ke halaman lain.
+    keepTableNotes(model, tableNotes);
     if (config.normalizeTables) {
         const tl = applyTableLines(nodes, outline, tableLook, {
             lines: config.tableBorders === "minimal",
@@ -439,7 +459,9 @@ export async function transformDocx(
             notes.push(`${c.uncaptioned.length} ${noun} di bab belum memiliki keterangan: ${c.uncaptioned.slice(0, 5).join("; ")}. Tambahkan judulnya ${isTable ? "di atas tabel" : "di bawah gambar"}. Formatter tidak membuat judul sendiri.`);
         if (c.unresolved.length)
             notes.push(`Rujukan ${c.unresolved.join(", ")} di teks tidak menemukan ${noun}nya di dokumen dan dibiarkan apa adanya.`);
-        if (c.skipped.length)
+        if (c.wouldRenumber.length)
+            notes.push(`Nomor keterangan ${noun} tidak diubah otomatis (mengubah nomor = mengubah isi naskah). Bila dinomori ulang berurutan, yang berubah: ${c.wouldRenumber.slice(0, 6).join("; ")}${c.wouldRenumber.length > 6 ? "; …" : ""}. Periksa dan sesuaikan manual bila perlu.`);
+        else if (c.skipped.length)
             notes.push(config.captionNumbering === "global"
                 ? `Penomoran ${noun} tidak diubah karena ada keterangan ${noun} yang formatnya tidak dikenali. Periksa keterangan ${noun}.`
                 : `Penomoran ${noun} di Bab ${c.skipped.join(", ")} tidak diubah karena ada keterangan ${noun} yang formatnya tidak dikenali. Periksa keterangan ${noun} di bab tersebut.`);
@@ -454,7 +476,8 @@ export async function transformDocx(
     const labels = alignLabelLines(nodes, outline, { halfPts });
     if (labels.lines) notes.push(`${labels.lines} baris "Label : isi" (identitas, kop surat, singkatan) disejajarkan titik duanya.`);
     const appendixTitles = formatAppendixTitles(nodes, outline, { halfPts, exact: config.lineRule === "exact" });
-    if (appendixTitles) notes.push(`${appendixTitles} judul lampiran ("Lampiran n. …") dirapikan: rata kiri, baris lanjutan sejajar judul, menempel ke isinya.`);
+    // Lampiran beku: perubahan judul lampiran dibatalkan di akhir, jadi tidak dilaporkan.
+    if (appendixTitles && !freeze.frozen) notes.push(`${appendixTitles} judul lampiran ("Lampiran n. …") dirapikan: rata kiri, baris lanjutan sejajar judul, menempel ke isinya.`);
     const refs = arrangeReferences(model, nodes, outline, config.citationStyle as CitationStyle);
     if (refs.sorted) notes.push(`Daftar pustaka (${refs.entries} entri) diurutkan sesuai abjad nama penulis.`);
     if (refs.numbersRemoved) notes.push(`${refs.numbersRemoved} nomor di depan entri daftar pustaka dihapus (gaya ${config.citationStyle} tidak bernomor).`);
@@ -480,7 +503,7 @@ export async function transformDocx(
 
     const demoted = demoteFromToc(nodes, outline, model.body);
     if (demoted.appendix) notes.push(`${demoted.appendix} judul lampiran hanya dicantumkan di Daftar Lampiran; Daftar Isi cukup memuat LAMPIRAN.`);
-    if (demoted.shaped) notes.push(`${demoted.shaped} judul lampiran diseragamkan menjadi "LAMPIRAN n" dan judulnya di baris berikutnya, dengan penomoran berurutan.`);
+    if (demoted.shaped && !freeze.frozen) notes.push(`${demoted.shaped} judul lampiran diseragamkan menjadi "LAMPIRAN n" dan judulnya di baris berikutnya, dengan penomoran berurutan.`);
     if (demoted.front) notes.push(`${demoted.front} judul bagian awal (persetujuan, pengesahan, pernyataan, motto, persembahan) tidak dicantumkan di Daftar Isi. Daftar Isi dimulai dari Kata Pengantar.`);
 
     // Format kolom (UNPAD): disusun setelah demote supaya isinya sudah final.
@@ -773,11 +796,29 @@ export async function transformDocx(
 
     /* -------- verifikasi: dokumen FINAL (sesudah semua tahap) dibanding asli -------- */
 
+    // Lampiran dikembalikan ke aslinya (hanya halaman/margin/nomor halaman & objek terlalu lebar).
+    // Kotak HTML tersembunyi (hasil tempel dari web/Mendeley) yang menggeser indentasi di Word dilepas.
+    const webDivs = await detachWebDivs(zip, model, divInd0);
+    if (webDivs) notes.push(`${webDivs} paragraf dilepas dari "kotak HTML" tersembunyi bawaan teks tempelan web/pengelola referensi (margin kotak itu ditambahkan Word ke indentasi, sehingga teks bergeser). Teksnya tidak berubah.`);
+    let thawed: RestoreReport | null = null;
+    if (freeze.frozen) {
+        thawed = restoreAppendix(model, freeze.frozen, usableWidth, page.heightTwips - page.margin.top - page.margin.bottom);
+        if (thawed.problem) notes.push(`Lampiran tidak bisa dikembalikan persis seperti aslinya (${thawed.problem}); isi lampiran ikut dirapikan — periksa bagian lampiran.`);
+        else {
+            const extra = [
+                thawed.imagesScaled ? `${thawed.imagesScaled} gambar` : "",
+                thawed.tablesFitted ? `${thawed.tablesFitted} tabel` : "",
+            ].filter(Boolean).join(" dan ");
+            notes.push(`Lampiran (mulai "${freeze.frozen.title.slice(0, 40)}" sampai akhir dokumen) dibiarkan seperti naskah asli: hanya ukuran kertas, margin, dan nomor halaman yang disesuaikan${extra ? `; ${extra} yang lebih lebar dari area teks diperkecil proporsional (isinya tetap)` : ""}.`);
+        }
+    }
+    if (freeze.note) notes.push(freeze.note);
+
     const finalXml = serializeDocument(model);
     zip.file("word/document.xml", finalXml);
     const after = fingerprint(finalXml);
 
-    const verifyOpts: VerifyOptions = {
+    const verifyOpts0: VerifyOptions = {
         unorderedPrefix: cover.reordered ? cover.coverLines : 0,
         regions: [
             ...headings.regions,
@@ -796,6 +837,7 @@ export async function transformDocx(
             ...labels.regions,
             ...tpl.regions,
             ...front.regions,
+            ...figGroups.regions,
         ],
         // Tabel/gambar yang sengaja ditambah (+) atau dibuang (−): tanda tangan, sampul lama, bingkai
         // pernyataan (dibuka / dibungkus kotak), dan bagian depan dari template.
@@ -803,14 +845,23 @@ export async function transformDocx(
             tables: signatures.added.tables - tpl.removed.tables - (unwrapped?.tables ?? 0) + boxed + front.delta.tables,
             rows: signatures.added.rows - tpl.removed.rows - (unwrapped?.rows ?? 0) + boxed + front.delta.rows,
             cells: signatures.added.cells - tpl.removed.cells - (unwrapped?.cells ?? 0) + boxed + front.delta.cells,
-            drawings: front.delta.drawings,
+            drawings: front.delta.drawings - figGroups.removedDrawings,
+            equations: front.delta.equations,
         },
         removedImageIds: front.removedImageIds,
     };
-    const issues = [...front.issues, ...verify(before, after, verifyOpts)];
+    // Lampiran beku diperiksa terpisah (harus identik); sisanya diperiksa seperti biasa.
+    const fz = thawed && !thawed.problem ? verifyWithFreeze(before, after, verifyOpts0, thawed) : null;
+    const verifyOpts = fz?.opts ?? verifyOpts0;
+    const issues = [...front.issues, ...(fz?.issues ?? []), ...verify(fz?.before ?? before, fz?.after ?? after, verifyOpts)];
+    // Nomor judul yang TAMPIL (nomor otomatis Word disimulasikan ulang + nomor ketikan) harus sama dengan asli.
+    const numChanged = changedHeadingNumbers(headingsBefore, model, (await zip.file("word/numbering.xml")?.async("string")) ?? "", finalStyles);
+    if (numChanged.length) issues.push({
+        level: "error",
+        message: `${numChanged.length} nomor judul berubah dari naskah asli, mis. ${numChanged.slice(0, 3).map((c) => `"${c.label} ${c.line.slice(0, 40)}"${c.now ? "" : " (tidak ditemukan)"}`).join(", ")}.`,
+    });
     const unexplained = issues.some((i) => i.level === "error" && /^Teks dokumen berubah sekitar/.test(i.message))
-        ? residualLines(before, after, verifyOpts) : null;
-
+        ? residualLines(fz?.before ?? before, fz?.after ?? after, verifyOpts) : null;
 
     const preview = [...front.preview, ...nodes.slice(0, 300).map((n, i) => ({
         role: outline.items[i]?.role ?? "body",

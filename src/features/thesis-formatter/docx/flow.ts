@@ -10,6 +10,7 @@
 import type JSZip from "jszip";
 import { withProps, PPR_ORDER } from "./xml";
 import type { DocModel, ParaNode, TableNode } from "./document-model";
+import { isEmptyParagraph } from "./document-model";
 import type { Outline } from "../structure/outline";
 import { isHeadingRole, startsNewPage, type Role } from "../structure/roles";
 import { paragraphLine, type VerifyRegion } from "./verify";
@@ -80,7 +81,7 @@ export function cleanFlow(
     p.xml = p.xml.replace(PAGE_BR, "");
     p.hasPageBreak = false;
     out.breaks++;
-    if (!p.text.trim() && !p.hasDrawing && !p.hasSectPr && !/<w:(fldChar|bookmarkStart)\b/.test(p.xml)) {
+    if (isEmptyParagraph(p) && !p.hasDrawing && !p.hasSectPr) {
       body.splice(k, 1);
       k--;
     }
@@ -88,8 +89,7 @@ export function cleanFlow(
 
   /* ---- 2. Baris kosong ---- */
   const isBlank = (n: Node | undefined): n is ParaNode =>
-    isPara(n) && !n.text.trim() && !n.hasDrawing && !n.hasSectPr &&
-    !/<w:(fldChar|fldSimple|bookmarkStart|object|pict|sym)\b|<mc:AlternateContent|<m:oMath|w:type="page"/.test(n.xml);
+    isPara(n) && isEmptyParagraph(n) && !n.hasDrawing && !n.hasSectPr;
   const anchored = (n: Node | undefined) =>
     !!n && (n.kind === "table" || isCaption(n) || isHeadingRole(roleAt(n) ?? "body") || (isPara(n) && exclude.has(n.id)));
 

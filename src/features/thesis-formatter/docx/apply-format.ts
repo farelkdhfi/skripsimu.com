@@ -9,16 +9,17 @@
 
 import {
   elementEnd, indent, jc, mergeProps, onOff, rFonts, spacing, sz, szCs, withProps,
-  PPR_ORDER, RPR_ORDER,
+  PPR_ORDER, RPR_ORDER, TRPR_ORDER,
 } from "./xml";
 import {
-  cellParagraphs, flatten, type BlockNode, type DocModel,
+  cellParagraphs, flatten, isEmptyParagraph, type BlockNode, type DocModel,
   type ParaNode,
 } from "./document-model";
 import type { FormatRules, ParaFormat, RunFormat } from "../rules/format-rules";
 import type { Outline } from "../structure/outline";
 import type { Role, Zone } from "../structure/roles";
 import { normalizeTable } from "./tables";
+import { fitTableWidth, tableClass } from "./layout-groups";
 import { isHeadingRole } from "../structure/roles";
 
 
@@ -31,6 +32,8 @@ export type ApplyReport = {
   pageBreaksAdded: number;
   /** Judul yang tadinya terpisah dari isinya oleh pindah halaman manual. */
   orphanHeadingsFixed: number;
+  /** Tabel tata letak berisi objek melayang/kotak teks yang dibiarkan utuh. */
+  complexTablesSkipped: number;
 };
 
 const ALIGN: Record<string, "left" | "center" | "right" | "both"> = {
@@ -241,9 +244,11 @@ function numAttr(attrs: string, name: string): number | undefined {
 function trimEdges(xml: string, leadingTabs: boolean): string {
   // Tepi kiri: buang token <w:tab/> dan spasi di awal sampai bertemu huruf.
   let out = xml;
-  const tokenRe = /<w:t(\s[^>]*)?>([\s\S]*?)<\/w:t>|<w:tab\s*\/>/g;
+  // Rumus, gambar, simbol, dll. juga isi: tepi berhenti di sana (spasi "= " sebelum rumus bukan tepi).
+  const tokenRe = /<w:t(\s[^>]*)?>([\s\S]*?)<\/w:t>|<w:tab\s*\/>|<m:oMath\b|<w:drawing\b|<w:pict\b|<w:object\b|<w:sym\b|<mc:AlternateContent\b/g;
   let m: RegExpExecArray | null;
   while ((m = tokenRe.exec(out))) {
+    if (!m[0].startsWith("<w:t")) break;
     if (m[0].startsWith("<w:tab")) {
       if (!leadingTabs) break;
       out = out.slice(0, m.index) + out.slice(m.index + m[0].length);
@@ -260,8 +265,11 @@ function trimEdges(xml: string, leadingTabs: boolean): string {
   }
   // Tepi kanan: spasi di akhir teks terakhir.
   const all = [...out.matchAll(/<w:t(\s[^>]*)?>([\s\S]*?)<\/w:t>/g)];
+  let lastObj = -1;
+  for (const o of out.matchAll(/<m:oMath\b|<w:drawing\b|<w:pict\b|<w:object\b|<w:sym\b|<mc:AlternateContent\b/g)) lastObj = o.index!;
   for (let k = all.length - 1; k >= 0; k--) {
     const t = all[k];
+    if (t.index! < lastObj) break;
     const trimmed = t[2].replace(/[ \u00a0]+$/, "");
     if (trimmed !== t[2]) {
       const idx = t.index!;
@@ -291,8 +299,8 @@ export function formatParagraph(
 
 function isDroppableEmpty(n: BlockNode): n is ParaNode {
   return (
-    n.kind === "paragraph" && !n.text.trim() && !n.hasDrawing && !n.hasSectPr &&
-    !n.hasField && !n.hasPageBreak && !/<w:bookmarkStart/.test(n.xml)
+    n.kind === "paragraph" && isEmptyParagraph(n) && !n.hasDrawing && !n.hasSectPr &&
+    !n.hasField && !n.hasPageBreak
   );
 }
 
@@ -342,6 +350,7 @@ export function applyFormat(
   const rep: ApplyReport = {
     paragraphsFormatted: 0, runsFormatted: 0, tablesNormalized: 0,
     blankParagraphsRemoved: 0, duplicatePageBreaksRemoved: 0, pageBreaksAdded: 0, orphanHeadingsFixed: 0,
+    complexTablesSkipped: 0,
   };
 
   const nodes = flatten(model.body);
@@ -364,6 +373,21 @@ export function applyFormat(
     if (node.kind === "table") {
       // Tabel tanda tangan bukan tabel data: dirapikan oleh modul tanda tangan.
       // Tabel tanpa garis di sampul/bagian awal = tabel tata letak (lembar pengesahan): dibiarkan.
+      // Tabel berisi objek melayang/kotak teks/shape/tabel bersarang (mis. foto + keterangan kotak
+      // teks yang posisinya relatif ke paragraf pengganjal): satu susunan tata letak, TIDAK disentuh.
+      // Satu-satunya yang diubah: baris tidak boleh terpotong pindah halaman (properti paginasi saja,
+      // tidak menggeser isi sel) — supaya gambar & keterangannya tidak terbelah ke dua halaman
+      // ketika alur teks di atasnya bergeser akibat margin/spasi baru.
+      if (tableClass(node) === "complex") {
+        rep.complexTablesSkipped++;
+        for (const row of node.rows) {
+          row.props = `<w:trPr>${mergeProps(row.props, { "w:cantSplit": "<w:cantSplit/>" }, TRPR_ORDER).join("")}</w:trPr>`;
+        }
+        return;
+      }
+      // Tabel tata letak (tanpa garis / penata gambar): bukan tabel data — tidak diberi garis &
+      // format data, hanya diperkecil bila melebihi area teks.
+      if (tableClass(node) === "layout" && zone === "main") { fitTableWidth(node, usableWidth); return; }
       const layoutTable = (zone === "cover" || zone === "front") && borderless(node);
       if (opts.normalizeTables && !opts.skipTables?.has(node.id) && !layoutTable) {
         const texts = node.rows.map((r) => r.cells.map((c) => cellParagraphs(c).map((p) => p.text).join(" ").trim()));

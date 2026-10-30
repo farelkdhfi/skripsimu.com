@@ -19,6 +19,7 @@ import { withProps, PPR_ORDER } from "./xml";
 import { flatten, parseBlocks, type BlockNode, type DocModel, type ParaNode } from "./document-model";
 import { captionKind, scanStructure, type Zone } from "../structure/roles";
 import { inlineOf, maxId } from "./figure-split";
+import { nearFloatingShape, tableClass } from "./layout-groups";
 
 const CUE_RE = /^(mengetahui|menyetujui|mengesahkan|disetujui|disahkan|pembimbing|penguji|ketua|dekan|wakil|rektor|direktur|kepala|sekretaris|koordinator|kaprodi|yang\s+menyatakan|yang\s+membuat|penulis|peneliti|mahasiswa|materai|meterai|hormat\s+(saya|kami))\b/i;
 const DATE_RE = /^[A-Z][A-Za-z.'\- ]{1,40},\s*(\d{1,2}\s+)?[A-Za-z]{3,12}\s+\d{4}\.?$/;
@@ -100,7 +101,8 @@ export function inlineFloatingImages(model: DocModel): { inlined: number; moved:
             if (n.kind === "container") { walk(n.children, inherited); continue; }
             const z = inherited ?? (n.kind === "paragraph" || n.kind === "table" ? zoneOf.get(n) ?? "main" : "main");
             if (n.kind === "paragraph") slots.push({ p: n, list, zone: z });
-            else if (n.kind === "table") for (const r of n.rows) for (const c of r.cells) walk(c.children, z);
+            // Tabel tata letak berisi objek melayang: satu susunan, gambarnya tidak dipindah.
+            else if (n.kind === "table" && tableClass(n) !== "complex") for (const r of n.rows) for (const c of r.cells) walk(c.children, z);
         }
     };
     walk(model.body, null);
@@ -149,7 +151,9 @@ export function inlineFloatingImages(model: DocModel): { inlined: number; moved:
         // Gambar yang ditumpuki bentuk (panah, label) di paragraf ini/sebelah: satu susunan.
         const li = list.indexOf(p);
         const neighbors = [list[li - 1], list[li + 1]].filter((n): n is ParaNode => n?.kind === "paragraph");
-        const composite = hasShapes(p) || neighbors.some(hasShapes);
+        // Kotak teks/shape melayang dalam ≤ 3 paragraf (mis. keterangan "Ilustrasi 1" berupa kotak
+        // teks yang posisinya relatif ke paragraf pengganjal di bawah foto) = satu susunan.
+        const composite = hasShapes(p) || neighbors.some(hasShapes) || nearFloatingShape(list, li, 3);
         const shortPara = p.text.trim().length <= 80;
         const cue = nearCue(p);
 

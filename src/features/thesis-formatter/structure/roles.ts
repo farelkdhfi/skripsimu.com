@@ -101,6 +101,7 @@ const LIST_ENTRY_RE = /(\.{3,}|\u2026|\t)\s*[\divxlcdm]+\s*$/i;
  */
 const PAGE_NUM_TAIL = /(\.{2,}|\u2026|\t|\s{2,})\s*[\divxlcdm]+\s*$/i;
 const SECTION_RE = /^(\d+)\.(\d+)[.)]?\s+\S/;
+/** Subbab = TEPAT tiga tingkat (2.1.4). Empat tingkat (2.1.4.1) = judul tingkat 4 (minor-headings), bukan subbab. */
 const SUBSECTION_RE = /^(\d+)\.(\d+)\.(\d+)[.)]?\s+\S/;
 const ALPHA_SECTION_RE = /^[A-Z]\.\s+\S/;
 const CAPTION_RE = /^(gambar|gbr\.?|figure|fig\.?|grafik|bagan|diagram|ilustrasi|tabel|table|tbl\.?)\s*\.?\s*(?:[A-Za-z]{1,2}[.\-]?)?\d+(?:[.\-]\d+)*\s*[.:]?\s*/i;

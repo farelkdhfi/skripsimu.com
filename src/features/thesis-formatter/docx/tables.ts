@@ -482,3 +482,39 @@ export function keepTablesTogether(
   }
   return count;
 }
+/**
+ * Tabel + catatannya ("Keterangan :", "P1 = …", "Sumber: …", "a) …") satu kesatuan: baris
+ * terakhir tabel menempel ke catatan pertama, setiap baris catatan menempel ke baris catatan
+ * berikutnya dan tidak terpecah. Bila tidak muat, tabel bagian akhir + catatannya pindah halaman
+ * bersama, jadi catatan tidak tertinggal sebagian di halaman lain. Hanya pengaturan halaman.
+ */
+export function keepTableNotes(model: DocModel, tableNotes: TableNotes): number {
+  let count = 0;
+  const body = model.body;
+  for (let i = 0; i < body.length; i++) {
+    const t = body[i];
+    if (t.kind !== "table" || !t.rows.length) continue;
+    const notes: ParaNode[] = [];
+    for (let k = i + 1; k < body.length; k++) {
+      const n = body[k];
+      // Elemen tak tampil di antara paragraf (bookmarkEnd, permEnd, …) tidak memutus catatan.
+      if (n.kind === "raw") continue;
+      if (n.kind !== "paragraph" || !tableNotes.has(n.id)) break;
+      notes.push(n);
+    }
+    if (!notes.length) continue;
+    const last = t.rows[t.rows.length - 1];
+    last.props = `<w:trPr>${mergeProps(last.props, { "w:cantSplit": "<w:cantSplit/>" }, TRPR_ORDER).join("")}</w:trPr>`;
+    for (const cell of last.cells) for (const p of cellParagraphs(cell)) {
+      p.xml = withProps(p.xml, "w:pPr", { "w:keepNext": "<w:keepNext/>" }, PPR_ORDER);
+    }
+    notes.forEach((p, j) => {
+      p.xml = withProps(p.xml, "w:pPr", {
+        "w:keepNext": j < notes.length - 1 ? "<w:keepNext/>" : undefined,
+        "w:keepLines": "<w:keepLines/>",
+      }, PPR_ORDER);
+    });
+    count++;
+  }
+  return count;
+}

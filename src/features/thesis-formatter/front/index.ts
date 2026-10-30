@@ -68,7 +68,7 @@ export type FrontResult = FrontReport & {
      * Daftar Isi, jadi bila digabung ke blok bagian depan, baris Daftar Isi yang ikut terambil.
      */
     regions: VerifyRegion[];
-    delta: { drawings: number; tables: number; rows: number; cells: number };
+    delta: { drawings: number; tables: number; rows: number; cells: number; equations: number };
     removedImageIds: string[];
     tocRows: { text: string; bookmark: string }[];
     preview: FrontPreviewLine[];
@@ -90,7 +90,7 @@ const nulls = <T,>(v: T) => Object.fromEntries(FIELD_KEYS.map((k) => [k, v])) as
 const empty = (reason: string | null): FrontResult => ({
     built: false, reason, found: [], missing: [], fields: nulls(null), sources: nulls(null),
     unmapped: [], notes: [], issues: [], romanStarted: false, regions: [],
-    delta: { drawings: 0, tables: 0, rows: 0, cells: 0 }, removedImageIds: [], tocRows: [], preview: [],
+    delta: { drawings: 0, tables: 0, rows: 0, cells: 0, equations: 0 }, removedImageIds: [], tocRows: [], preview: [],
 });
 
 /* ------------------------------------------------------------------ */
@@ -835,6 +835,7 @@ export async function buildFrontMatter(
             tables: after.tables - before.tables,
             rows: after.rows - before.rows,
             cells: after.cells - before.cells,
+            equations: after.equations - before.equations,
         },
         removedImageIds,
         tocRows: fill.tocRows,

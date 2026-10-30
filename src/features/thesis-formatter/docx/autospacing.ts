@@ -7,6 +7,7 @@
  */
 import { withProps, PPR_ORDER } from "./xml";
 import { cellParagraphs, flatten, type DocModel, type ParaNode, type TableNode } from "./document-model";
+import { paragraphsInComplexTables } from "./layout-groups";
 import type { PageInfo } from "./page-openers";
 
 type Auto = { before: boolean; after: boolean };
@@ -111,9 +112,11 @@ function everyParagraph(model: DocModel): { p: ParaNode; owner: ParaNode | Table
 
 export function neutralizeAutoSpacing(model: DocModel, info: PageInfo, stylesXml: string): number {
     const resolve = autoSpacingResolver(stylesXml);
+    const frozen = paragraphsInComplexTables(model);
     let count = 0;
     for (const { p, owner } of everyParagraph(model)) {
         if (info.get(owner)?.zone === "cover") continue;
+        if (frozen.has(p)) continue;                     // tabel tata letak berisi objek melayang: utuh
         if (neutralize(p, resolve)) count++;
     }
     return count;

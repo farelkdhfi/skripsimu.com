@@ -63,14 +63,15 @@ function setLabelLine(p: ParaNode, oldLen: number, label: string) {
   p.xml = xml;
 }
 
-type Entry = { i: number; p: ParaNode; level: 2 | 3; nums: number[] | null; lettered: boolean; dotted: boolean; changed: boolean };
+/** locked: nomornya ditulis dari nomor otomatis Word (persis yang tampil di naskah asli) → tidak diubah. */
+type Entry = { i: number; p: ParaNode; level: 2 | 3; nums: number[] | null; lettered: boolean; dotted: boolean; changed: boolean; locked: boolean };
 
 export function normalizeHeadings(
   nodes: (ParaNode | TableNode)[],
   outline: Outline,
   rules: FormatRules,
   rep: ApplyReport,
-  opts: { titleCase: boolean },
+  opts: { titleCase: boolean; locked?: Set<ParaNode> },
 ): HeadingReport {
   const out: HeadingReport = { renumbered: 0, retitled: 0, relevelled: 0, chaptersSplit: 0, regions: [] };
   let chapterNo = 0;
@@ -83,7 +84,7 @@ export function normalizeHeadings(
 
     // Awalan bab yang salah (mis. "1.3" di dalam BAB II), bila mayoritas sudah benar.
     if (c && numeric.filter((e) => e.nums![0] === c).length * 2 >= numeric.length) {
-      for (const e of numeric) if (e.nums![0] !== c) { e.nums = [c, ...e.nums!.slice(1)]; e.changed = true; }
+      for (const e of numeric) if (e.nums![0] !== c && !e.locked) { e.nums = [c, ...e.nums!.slice(1)]; e.changed = true; }
     }
 
     // Rangkaian judul berhuruf (A., B., C.) di antara judul bernomor.
@@ -126,7 +127,7 @@ export function normalizeHeadings(
       const parent = e.nums.slice(0, -1).join(".");
       const own = e.nums[e.nums.length - 1];
       const last = lastOf.get(parent);
-      if (last !== undefined && own <= last) {
+      if (last !== undefined && own <= last && !e.locked) {
         const want = last + 1;
         const next = entries.slice(idx + 1).find((x) =>
           x.nums && x.nums.length === e.nums!.length && x.nums.slice(0, -1).join(".") === parent);
@@ -211,7 +212,7 @@ export function normalizeHeadings(
     const lettered = /^[A-Z]$/.test(tok);
     const nums = lettered ? null : tok.split(".").map(Number);
     entries.push({
-      i, p: n, lettered, nums, changed: false,
+      i, p: n, lettered, nums, changed: false, locked: Boolean(opts.locked?.has(n)),
       level: nums ? (nums.length >= 3 ? 3 : 2) : it.role === "subsection" ? 3 : 2,
       dotted: /[.)][ \t\u00a0]+$/.test(m[0]),
     });

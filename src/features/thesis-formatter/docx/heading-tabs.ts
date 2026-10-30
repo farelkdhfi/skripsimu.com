@@ -13,11 +13,23 @@ import type { Outline } from "../structure/outline";
 const NUM_TAB_RE = /^[ \u00a0]*(\d+(?:\.\d+)+\.?)[ \u00a0]*\t/;
 
 /** Lebar kira-kira nomor tebal ("2.1.10") dalam twip. */
-function numberWidth(num: string, halfPts: number): number {
+export function numberWidth(num: string, halfPts: number): number {
     const em = halfPts * 10;
     let w = 0;
     for (const ch of num) w += /\d/.test(ch) ? 0.5 : 0.25;
     return Math.round(w * em * 1.05);
+}
+
+/**
+ * Posisi teks judul sesudah nomor: indentasi alinea, atau kelipatan setengahnya berikutnya bila
+ * nomornya lebih lebar ("2.1.4.1"). Dipakai bersama oleh subbab, judul tingkat 4, dan daftar flat
+ * supaya teks semua judul bernomor sejajar.
+ */
+export function textStop(num: string, indent: number, halfPts: number): number {
+    const step = Math.max(284, Math.round(indent / 2));
+    let pos = Math.max(indent, step);
+    while (pos < numberWidth(num, halfPts) + 90) pos += step;
+    return pos;
 }
 
 export function alignHeadingTabs(
@@ -26,15 +38,12 @@ export function alignHeadingTabs(
     opts: { indent: number; halfPts: number },
 ): number {
     let count = 0;
-    const step = Math.max(284, Math.round(opts.indent / 2));
     nodes.forEach((n, i) => {
         const role = outline.items[i]?.role;
         if (n.kind !== "paragraph" || (role !== "section" && role !== "subsection")) return;
         const m = NUM_TAB_RE.exec(leadingRaw(n.xml, 40));
         if (!m) return;
-        const need = numberWidth(m[1], opts.halfPts) + 90;
-        let pos = Math.max(opts.indent, step);
-        while (pos < need) pos += step;
+        const pos = textStop(m[1], opts.indent, opts.halfPts);
         const tabs = `<w:tabs><w:tab w:val="left" w:pos="${pos}"/></w:tabs>`;
         const pPr = /<w:pPr>[\s\S]*?<\/w:pPr>/.exec(n.xml)?.[0] ?? "";
         if ((/<w:tabs>[\s\S]*?<\/w:tabs>/.exec(pPr)?.[0] ?? "") === tabs) return;

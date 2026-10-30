@@ -21,13 +21,17 @@ import type { Outline } from "../structure/outline";
 import { isHeadingRole } from "../structure/roles";
 import { leadingRaw, removeLeading } from "./lists";
 import { paragraphLine, type VerifyRegion } from "./verify";
+import { textStop } from "./heading-tabs";
 
 const MINOR_STYLE_RE = /^(?:heading|judul|kop)\s*[4-9]$/i;
 /** Penanda di awal paragraf (pada aliran run, termasuk tab). */
 const MARK_RAW_RE = /^[ \t\u00a0]*(\(?(?:\d{1,2}|[a-zA-Z]|[ivx]{2,4}|[IVX]{2,4})[.)])[ \t\u00a0]*(?=\S)/;
 /** Penanda + sisa teks (pada teks paragraf). */
 const MARK_TEXT_RE = /^(\(?(?:\d{1,2}|[a-zA-Z]|[ivx]{2,4}|[IVX]{2,4})[.)])\s*(\S.*)$/;
-const NUM4_RE = /^\s*\d+\.\d+\.\d+\.\d+\.?\s+(\S.*)$/;
+const NUM4_RE = /^\s*\d+\.\d+\.\d+\.\d+(?:\.\d+)?\.?\s+(\S.*)$/;
+/** Nomor bertingkat empat+ di awal paragraf ("2.1.4.1⇥", "3.4.2.1 "), pada aliran run. */
+const NUM4_RAW_RE = /^[ \t\u00a0]*(\d+\.\d+\.\d+\.\d+(?:\.\d+)?)\.?[ \t\u00a0]*(?=\S)/;
+
 
 const norm = (s: string) => s.replace(/\s+/g, " ").trim();
 
@@ -111,7 +115,7 @@ export type MinorHeadings = {
   ids: Set<number>;
   count: number;
   /** Dipanggil SETELAH applyFormat/applyListLayout: format judul tingkat 4 diterapkan. */
-  apply: (o: { rep: ApplyReport; font: string; halfPts: number; line?: number }) => VerifyRegion[];
+  apply: (o: { rep: ApplyReport; font: string; halfPts: number; line?: number; indent?: number }) => VerifyRegion[];
 };
 
 export async function detectMinorHeadings(
@@ -185,7 +189,16 @@ export async function detectMinorHeadings(
 
   const saved = new Map<ParaNode, string>(accepted.map((c) => [c.p, c.p.xml]));
 
-  const apply: MinorHeadings["apply"] = ({ rep, font, halfPts, line = 240 }) => {
+  // Style "Heading 4" boleh dipakai untuk judul tingkat 4 bernomor ketikan bila ada di dokumen dan
+  // tidak membawa penomoran otomatis (kalau membawa, hanya paragraf yang penomorannya dimatikan
+  // langsung — numId 0 — yang aman; selebihnya akan bernomor dobel).
+  const stylesXml = (await zip.file("word/styles.xml")?.async("string")) ?? "";
+  const h4 = /<w:style\b[^>]*w:type="paragraph"[^>]*w:styleId="(Heading4|Judul4)"[^>]*>([\s\S]*?)<\/w:style>/.exec(stylesXml);
+  const h4Id = h4?.[1] ?? null;
+  const h4Numbered = Boolean(h4 && /<w:numPr>/.test(h4[2]));
+  const numOff = (x: string) => /<w:numPr>\s*<w:ilvl w:val="\d+"\/>\s*<w:numId w:val="0"\/>/.test(/<w:pPr>[\s\S]*?<\/w:pPr>/.exec(x)?.[0] ?? "");
+
+  const apply: MinorHeadings["apply"] = ({ rep, font, halfPts, line = 240, indent = 709 }) => {
     const regions: VerifyRegion[] = [];
     const order = new Map<string, number>();
     for (const c of accepted) {
@@ -209,8 +222,11 @@ export async function detectMinorHeadings(
       const textRuns = [...original.matchAll(/<w:r(?:\s[^>]*)?>([\s\S]*?)<\/w:r>/g)].filter((m) => /<w:t[\s>]/.test(m[1]));
       const allItalic = textRuns.length > 0 && textRuns.every((m) => /<w:i(?:\s+w:val="(?:1|true|on)")?\s*\/>/.test(m[1]));
 
+      // Judul bernomor empat tingkat ("2.1.4.1 Kadar Air"): nomornya penanda, ber-style Heading 4.
+      const num4 = NUM4_RAW_RE.exec(leadingRaw(original, 40));
+      const useH4 = Boolean(num4 && h4Id && c.kind !== "styled" && !p.hasNumbering && (!h4Numbered || numOff(original)));
       formatParagraph(p, {
-        styleId: c.kind === "styled" ? undefined : null,
+        styleId: c.kind === "styled" ? undefined : useH4 ? h4Id : null,
         align: "left", line, left: 0, right: 0, firstLine: 0,
         before: line > 240 ? 0 : 180, after: line > 240 ? 0 : 120,
         keepNext: true, keepLines: true,
@@ -229,6 +245,12 @@ export async function detectMinorHeadings(
         p.xml = p.xml.slice(0, at) + `<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(nativeMarker)}</w:t><w:tab/></w:r>` + p.xml.slice(at);
         p.text = `${nativeMarker} ${norm(p.text)}`;
         marker = nativeMarker;
+      } else if (num4 && !p.hasNumbering) {
+        const m = NUM4_RAW_RE.exec(leadingRaw(p.xml, 40))!;
+        p.xml = removeLeading(p.xml, m[0].length);
+        const at = insertAt(p.xml);
+        p.xml = p.xml.slice(0, at) + `<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(m[1])}</w:t><w:tab/></w:r>` + p.xml.slice(at);
+        marker = m[1];
       } else if (c.kind === "typed" || c.kind === "styled") {
         const m = MARK_RAW_RE.exec(leadingRaw(p.xml, 40));
         if (m && !(c.kind === "styled" && p.hasNumbering)) {
@@ -241,7 +263,13 @@ export async function detectMinorHeadings(
 
       // Penanda di margin kiri, teks judul (dan baris lanjutannya) sejajar 0,75 cm / 1 cm.
       const props: Record<string, string | null> = {};
-      if (marker) {
+      if (marker && /^\d+(?:\.\d+){3,}$/.test(marker)) {
+        // Sama dengan judul subbab (heading-tabs): teks judul di indentasi alinea, atau kelipatan
+        // setengahnya bila nomornya lebih panjang. Baris lanjutan sejajar teks judul.
+        const pos = textStop(marker, indent, halfPts);
+        props["w:tabs"] = `<w:tabs><w:tab w:val="left" w:pos="${pos}"/></w:tabs>`;
+        props["w:ind"] = `<w:ind w:left="${pos}" w:right="0" w:hanging="${pos}"/>`;
+      } else if (marker) {
         const hang = marker.length > 2 ? 567 : 425;
         props["w:tabs"] = `<w:tabs><w:tab w:val="left" w:pos="${hang}"/></w:tabs>`;
         props["w:ind"] = `<w:ind w:left="${hang}" w:right="0" w:hanging="${hang}"/>`;

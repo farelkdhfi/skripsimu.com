@@ -402,6 +402,11 @@ export type CaptionReport = {
     uncaptioned: string[];
     /** Bab yang tidak dinomori ulang karena ada keterangan yang tidak dikenali. */
     skipped: number[];
+    /**
+     * Penomoran ulang hanya laporan: nomor keterangan yang AKAN berubah bila dinomori ulang
+     * ("Ilustrasi 6 → 5"). Bila ada, tidak ada nomor (keterangan maupun rujukan) yang diubah.
+     */
+    wouldRenumber: string[];
     appendix: Set<number>;
     regions: VerifyRegion[];
 };
@@ -423,7 +428,7 @@ export function arrangeCaptions(
             : opts.separator;
     const rep: CaptionReport = {
         kind, label, titled: 0, moved: 0, numbered: 0, refsUpdated: 0, split: 0,
-        unresolved: [], uncaptioned: [], skipped: [], appendix: new Set(), regions: [],
+        unresolved: [], uncaptioned: [], skipped: [], wouldRenumber: [], appendix: new Set(), regions: [],
     };
     const body = model.body;
     const itemOf = new Map<number, OutlineItem>();
@@ -501,6 +506,29 @@ export function arrangeCaptions(
         if (c != null) unsafe.add(c);
     });
     rep.skipped = [...unsafe].sort((a, b) => a - b);
+
+    // 3b. Penomoran ulang mengubah ISI (nomor keterangan & rujukannya di kalimat) → hanya laporan.
+    // Nomor yang sudah berurutan tetap dijadikan field SEQ (tampilannya sama); begitu ada satu
+    // nomor yang akan berubah — atau keterangan tanpa nomor — seluruh penomoran dibiarkan.
+    {
+        const cnt = new Map<number, number>();
+        body.forEach((n) => {
+            if (n.kind !== "paragraph" || roleOf(n) !== s.role || !r.starts.test(n.text)) return;
+            const c = chapterOf.get(n.id);
+            if (c == null || unsafe.has(c)) return;
+            const key = global ? 0 : c;
+            const k = (cnt.get(key) ?? 0) + 1;
+            cnt.set(key, k);
+            const next = global ? String(k) : `${c}.${k}`;
+            const om = r.oldNum.exec(n.text);
+            const old = om ? om[1].replace(/\s+/g, "").replace(/-/g, ".") : null;
+            if (old !== next) rep.wouldRenumber.push(`${s.label} ${old ?? "(tanpa nomor)"} → ${next}`);
+        });
+        if (rep.wouldRenumber.length) for (const n of body) {
+            const c = n.kind === "paragraph" ? chapterOf.get(n.id) : undefined;
+            if (c != null) unsafe.add(c);
+        }
+    }
 
     // 4. Penomoran ulang per bab + caption gaya Word (style Caption + SEQ).
     type Entry = { old: string | null; implied: string | null; next: string; pos: number; obj: number; chapter: number; desc: string };

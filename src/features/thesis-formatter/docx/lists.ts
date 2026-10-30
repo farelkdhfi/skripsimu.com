@@ -48,6 +48,14 @@ const decode = (s: string) =>
   s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");
 
 /** Awal teks paragraf (dengan tab & spasi asli) untuk dicocokkan dengan penanda. */
+const HEADING_STYLE_ID_RE = /^(?:heading|judul)\s*[1-9]$/i;
+function headingStyled(n: ParaNode): boolean {
+  const t = n.text.trim();
+  if (!t || t.length > 150 || /[.!?;:]$/.test(t)) return false;
+  const pPr = /<w:pPr>[\s\S]*?<\/w:pPr>/.exec(n.xml)?.[0] ?? "";
+  return HEADING_STYLE_ID_RE.test(n.styleId ?? "") || /<w:outlineLvl w:val="[0-8]"/.test(pPr);
+}
+
 export function leadingRaw(xml: string, max = 24): string {
   const re = /<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>|<w:tab\s*\/>/g;
   re.lastIndex = Math.max(0, xml.indexOf("</w:pPr>"));
@@ -339,6 +347,9 @@ export async function formatLists(
       return;
     }
     if (!inScope(i) || opts.exclude.has(n.id) || n.hasDrawing) return;
+    // Paragraf ber-style judul (Heading/Judul 1–9 atau outline level) yang pendek = judul, bukan
+    // butir daftar — walau memakai penomoran otomatis Word.
+    if (headingStyled(n)) return;
     const nat = numbering ? effectiveNum(n, styleNum) : null;
     if (nat) {
       const a = numbering!.num.get(nat.numId);

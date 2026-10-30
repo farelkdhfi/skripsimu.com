@@ -8,7 +8,7 @@
  * di atas Abstrak, dan paragraf kosong yang membawa section/pindah halaman/bookmark/field/gambar.
  */
 import { withProps, PPR_ORDER } from "./xml";
-import { flatten, type BlockNode, type DocModel, type ParaNode, type TableNode } from "./document-model";
+import { flatten, isEmptyParagraph, type BlockNode, type DocModel, type ParaNode, type TableNode } from "./document-model";
 import type { PageInfo } from "./page-openers";
 import type { Role } from "../structure/roles";
 
@@ -23,7 +23,7 @@ const PROSE_MIN = 40;
 
 /** Paragraf kosong biasa (hasil Enter) yang aman dibuang. */
 function isGap(n: ParaNode | TableNode): n is ParaNode {
-    return n.kind === "paragraph" && !n.text.trim() && !OBJECT_RE.test(n.xml) &&
+    return n.kind === "paragraph" && isEmptyParagraph(n) && !OBJECT_RE.test(n.xml) &&
         !/<w:sectPr\b/.test(n.xml) && !/<w:br\b[^>]*w:type="page"/.test(n.xml) &&
         !/<w:bookmarkStart\b|<w:fldChar\b|<w:instrText\b|<w:fldSimple\b/.test(n.xml);
 }

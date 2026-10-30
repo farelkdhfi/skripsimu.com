@@ -10,6 +10,8 @@ export type VerifyIssue = { level: "error" | "warn"; message: string };
 
 export type DocFingerprint = {
   drawings: number;
+  /** Rumus Office Math (m:oMath), tidak termasuk salinan cadangan di mc:Fallback. */
+  equations: number;
   embeddedImageIds: string[];
   tables: number;
   rows: number;
@@ -41,7 +43,8 @@ const decode = (s: string) => s
  * paragraf tetap harus identik.
  */
 export function paragraphLine(chunk: string): string {
-  const re = /<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g;
+  // Teks biasa (w:t) DAN teks rumus (m:t): rumus yang hilang/berubah ikut terdeteksi.
+  const re = /<[wm]:t(?:\s[^>]*)?>([\s\S]*?)<\/[wm]:t>/g;
   let m: RegExpExecArray | null;
   let line = "";
   while ((m = re.exec(chunk))) line += m[1];
@@ -55,6 +58,7 @@ function extractText(xml: string): string {
 export function fingerprint(documentXml: string): DocFingerprint {
   return {
     drawings: count(documentXml, /<w:drawing[\s>]/g) + count(documentXml, /<w:pict[\s>]/g) + count(documentXml, /<w:object[\s>]/g),
+    equations: count(documentXml.replace(/<mc:Fallback>[\s\S]*?<\/mc:Fallback>/g, ""), /<m:oMath[\s>]/g),
     embeddedImageIds: [...documentXml.matchAll(/<a:blip[^>]*r:embed="([^"]+)"/g)].map((m) => m[1]).sort(),
     tables: count(documentXml, /<w:tbl[\s>]/g),
     rows: count(documentXml, /<w:tr[\s>]/g),
@@ -77,7 +81,7 @@ export type VerifyRegion = { beforeLines: string[]; afterLines: string[]; before
 export type VerifyOptions = {
   unorderedPrefix?: number;
   regions?: VerifyRegion[];
-  added?: { tables: number; rows: number; cells: number; drawings?: number };
+  added?: { tables: number; rows: number; cells: number; drawings?: number; equations?: number };
   removedImageIds?: string[];
 };
 
@@ -101,7 +105,13 @@ function nearest(keys: string[], want: string, from: number, gone: Set<number>):
  * memuat barisnya secara berurutan, lalu tiap baris diambil dari kemunculan terdekat.
  */
 function removeGroup(lines: string[], targets: string[]): string[] {
-  if (!targets.length) return lines;
+  const gone = removeGroupIdx(lines, targets);
+  return gone.size ? lines.filter((_, i) => !gone.has(i)) : lines;
+}
+
+/** Seperti removeGroup, tetapi mengembalikan indeks baris yang dikeluarkan. */
+export function removeGroupIdx(lines: string[], targets: string[]): Set<number> {
+  if (!targets.length) return new Set();
   const keys = lines.map(keyOf);
   const want = targets.map(keyOf);
   const gone = new Set<number>();
@@ -134,7 +144,7 @@ function removeGroup(lines: string[], targets: string[]): string[] {
     const far = nearest(keys, w, cursor, gone);
     if (far !== -1) gone.add(far);
   }
-  return lines.filter((_, i) => !gone.has(i));
+  return gone;
 }
 
 /**
@@ -207,6 +217,10 @@ export function verify(before: DocFingerprint, after: DocFingerprint, opts: Veri
   const expectedDrawings = before.drawings + (add.drawings ?? 0);
   if (after.drawings < expectedDrawings)
     issues.push({ level: "error", message: `${expectedDrawings - after.drawings} gambar/objek hilang dari dokumen hasil.` });
+
+  const expectedEq = before.equations + (add.equations ?? 0);
+  if (after.equations < expectedEq)
+    issues.push({ level: "error", message: `${expectedEq - after.equations} rumus hilang dari dokumen hasil (asli ${before.equations}, hasil ${after.equations}).` });
 
   const allowed = [...(opts.removedImageIds ?? [])];
   const lost = before.embeddedImageIds.filter((id) => {

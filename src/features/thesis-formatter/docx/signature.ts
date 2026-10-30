@@ -16,7 +16,7 @@
  * Satu blok (tanggal + tabel + blok "Mengetahui") diikat agar tidak terpisah halaman.
  */
 import { childEl, innerXml, openTag, splitElements, withProps, rFonts, sz, szCs, PPR_ORDER, RPR_ORDER } from "./xml";
-import { cellParagraphs, parseBlocks, type DocModel, type ParaNode, type TableNode } from "./document-model";
+import { cellParagraphs, isEmptyParagraph, parseBlocks, type DocModel, type ParaNode, type TableNode } from "./document-model";
 import type { Outline, OutlineItem } from "../structure/outline";
 import { paragraphLine } from "./verify";
 
@@ -182,7 +182,7 @@ function signatureSpacing(kinds: K[]): Map<number, { before?: number; after?: nu
 }
 
 const isEmptyPara = (p: ParaNode) =>
-  !p.text.trim() && !p.hasDrawing && !p.hasSectPr && !p.hasPageBreak && !p.hasField;
+  isEmptyParagraph(p) && !p.hasDrawing && !p.hasSectPr && !p.hasPageBreak && !p.hasField;
 
 /* ------------------------------------------------------------------ */
 /* Tabel tanda tangan asli                                               */
