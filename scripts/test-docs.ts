@@ -231,6 +231,38 @@ async function hardChecks(zip: JSZip, docXml: string): Promise<string[]> {
     }
     if (gapFail) fails.push(gapFail);
     if (alienFail) fails.push(alienFail);
+    // 7) Daftar Tabel / Ilustrasi memuat SEMUA keterangan bernomor di isi bab (termasuk keterangan di
+    //    sel tabel tata letak & kotak teks). Dibandingkan per nomor unik.
+    if (refAt !== -1) {
+        const mainXml = docXml.slice(0, refAt);
+        const listSeg = (head: RegExp) => {
+            const hs = [...docXml.matchAll(head)];
+            if (!hs.length) return null;
+            const from = hs[hs.length > 1 ? 1 : 0].index!;             // [0] bisa entri Daftar Isi
+            const rest = docXml.slice(from + 10);
+            const to = rest.search(/>DAFTAR (?:ISI|TABEL|ILUSTRASI|GAMBAR|LAMPIRAN)<\/w:t>|>(?:BAB )?I<\/w:t>/);
+            return rest.slice(0, to === -1 ? 20000 : to);
+        };
+        const nums = (label: RegExp) => {
+            const set = new Set<string>();
+            for (const m of mainXml.matchAll(/<w:p\b[^>]*>(?:(?!<w:p\b)[\s\S])*?<\/w:p>/g)) {
+                const t = plain(m[0]).trim();
+                const k = label.exec(t);
+                if (k && t.length < 250) set.add(k[1]);
+            }
+            return set;
+        };
+        for (const [head, label, name] of [
+            [/>DAFTAR (?:ILUSTRASI|GAMBAR)<\/w:t>/g, /^(?:ilustrasi|gambar)\s+(\d+)\s*[.:]/i, "Ilustrasi/Gambar"],
+            [/>DAFTAR TABEL<\/w:t>/g, /^tabel\s+(\d+)\s*[.:]/i, "Tabel"],
+        ] as const) {
+            const seg = listSeg(head);
+            if (seg === null) continue;
+            const listed = (seg.match(/PAGEREF /g) ?? []).length;
+            const body = nums(label).size;
+            if (body && listed < body) fails.push(`Daftar ${name} memuat ${listed} entri, padahal di isi bab ada ${body} keterangan bernomor`);
+        }
+    }
     // 6) Baris keterangan rumus "simbol ⇥ = arti" tidak ditengahkan seperti rumus.
     const centeredLegend = paras.filter((x) => /<w:jc w:val="center"\/>/.test(/<w:pPr>[\s\S]*?<\/w:pPr>/.exec(x)?.[0] ?? "") &&
         /^\s*\S{1,12}\s*\t\s*=\s*\S/.test(plain(x)) && !/<w:tbl/.test(x));

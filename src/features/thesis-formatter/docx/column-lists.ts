@@ -17,7 +17,7 @@
  * dan cetak miring sebagian (nama ilmiah, istilah asing) ikut terbawa.
  */
 import { escapeXml } from "./xml";
-import { parseBlocks, serializeDocument, type DocModel, type ParaNode, type TableNode } from "./document-model";
+import { cellParagraphs, parseBlocks, serializeDocument, type DocModel, type ParaNode, type TableNode } from "./document-model";
 import type { Outline } from "../structure/outline";
 import { paragraphLine, type VerifyRegion } from "./verify";
 import { unwrapTocControls, type TocReport } from "./toc";
@@ -29,7 +29,32 @@ type Row =
   | { type: "front"; text: string; target?: ParaNode; bookmark?: string }
   | { type: "chapter"; label: string; text: string; segs: Seg[] }
   | { type: "section" | "subsection"; num: string; text: string; segs: Seg[]; target: ParaNode }
-  | { type: "item"; num: string; text: string; segs: Seg[]; target: ParaNode };
+  | { type: "item"; num: string; text: string; segs: Seg[]; target?: ParaNode; bookmark?: string };
+
+const FIG_CAP_RE = /^\s*(?:ilustrasi|gambar|grafik|foto|figure|bagan|diagram|peta)\s+\d+(?:[.\-]\d+)*\s*[.:\u2013\u2014-]?\s*\S/i;
+const TAB_CAP_RE = /^\s*(?:tabel|table)\s+\d+(?:[.\-]\d+)*\s*[.:\u2013\u2014-]?\s*\S/i;
+
+/**
+ * Paragraf keterangan di kotak teks (versi utama, bukan mc:Fallback): baris pertama yang terisi di
+ * tiap kotak. `at` = posisi di XML host untuk menyisipkan bookmark (sesudah w:pPr paragraf itu).
+ */
+function textboxParagraphs(xml: string): { text: string; segs: Seg[]; at: number }[] {
+  const fallback: [number, number][] = [...xml.matchAll(/<mc:Fallback>[\s\S]*?<\/mc:Fallback>/g)].map((m) => [m.index!, m.index! + m[0].length]);
+  const out: { text: string; segs: Seg[]; at: number }[] = [];
+  for (const m of xml.matchAll(/<w:txbxContent>([\s\S]*?)<\/w:txbxContent>/g)) {
+    if (fallback.some(([a, b]) => m.index! >= a && m.index! < b)) continue;
+    const base = m.index! + "<w:txbxContent>".length;
+    for (const p of m[1].matchAll(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g)) {
+      const text = paragraphLine(p[0]).trim();
+      if (!text) continue;
+      const e = p[0].indexOf("</w:pPr>");
+      const at = base + p.index! + (e !== -1 ? e + 8 : p[0].indexOf(">") + 1);
+      out.push({ text, segs: segmentsOf(p[0]), at });
+      break;                                        // hanya baris pertama yang tampil
+    }
+  }
+  return out;
+}
 
 /** Halaman awal yang tidak dicantumkan di Daftar Isi. */
 const FRONT_SKIP_RE = /\b(halaman\s+(judul|sampul)|sampul|persetujuan|pengesahan|pernyataan|motto|moto|persembahan|berita\s+acara)\b/i;
@@ -230,7 +255,40 @@ export function buildColumnLists(
     };
   };
 
+  /**
+   * Keterangan di dalam tabel tata letak (foto berdampingan): paragraf di sel, atau kotak teks di
+   * sel. Tabelnya sengaja tidak diubah, tetapi keterangannya tetap harus masuk Daftar Tabel/Ilustrasi.
+   * Dari kotak teks hanya baris PERTAMA yang terisi yang dipakai (kotak berukuran tetap hanya
+   * menampilkan baris itu; sisanya sering ketikan lama yang tersembunyi). Bookmark disisipkan di
+   * paragraf keterangan itu (tidak tampil; isi & tata letak tabel tidak berubah).
+   */
+  const fromLayoutTable = (t: TableNode) => {
+    for (const r of t.rows) for (const c of r.cells) for (const host of cellParagraphs(c)) {
+      const own = paragraphLine(host.xml.replace(/<mc:Fallback>[\s\S]*?<\/mc:Fallback>/g, "").replace(/<w:txbxContent>[\s\S]*?<\/w:txbxContent>/g, "")).trim();
+      if (own && (FIG_CAP_RE.test(own) || TAB_CAP_RE.test(own))) addCaption(own, segmentsOf(host.xml), { target: host });
+      const boxes = textboxParagraphs(host.xml).filter((b) => FIG_CAP_RE.test(b.text) || TAB_CAP_RE.test(b.text));
+      const names = boxes.map(() => `_FmtRef${bm++}`);
+      // Bookmark disisipkan dari belakang supaya posisi yang lebih depan tidak bergeser.
+      for (let k = boxes.length - 1; k >= 0; k--) {
+        const id = names[k].slice("_FmtRef".length);
+        host.xml = host.xml.slice(0, boxes[k].at) + `<w:bookmarkStart w:id="${id}" w:name="${names[k]}"/><w:bookmarkEnd w:id="${id}"/>` + host.xml.slice(boxes[k].at);
+      }
+      boxes.forEach((b, k) => addCaption(b.text, b.segs, { bookmark: names[k] }));
+    }
+  };
+  const addCaption = (t: string, allSegs: Seg[], to: { target?: ParaNode; bookmark?: string }) => {
+    const m = CAP_RE.exec(t);
+    if (!m) return;
+    const segs = afterPrefix(allSegs, CAP_PREFIX);
+    (TAB_CAP_RE.test(t) ? tables : figures).push({ type: "item", num: m[1], text: joined(segs) || m[2], segs, ...to });
+  };
+
   nodes.forEach((n, i) => {
+    if (n.kind === "table") {
+      const it = outline.items[i];
+      if (it && it.zone === "main") fromLayoutTable(n);
+      return;
+    }
     if (n.kind !== "paragraph") return;
     const it = outline.items[i];
     if (!it || it.zone === "cover") return;
@@ -402,7 +460,7 @@ export function buildColumnLists(
     rows.forEach((r, k) => {
       if (r.type !== "item") return;
       out.push(para({ left: COL, hanging: COL, before: k === 0 ? 240 : 120, dotEnd, center: numCenter },
-        tab() + run(r.num) + tab() + runs(r.segs, r.text) + tab() + tab() + ref(mark(r.target), pageOf(cache, r.text))));
+        tab() + run(r.num) + tab() + runs(r.segs, r.text) + tab() + tab() + ref(r.bookmark ?? mark(r.target!), pageOf(cache, r.text))));
     });
     return out.join("");
   };

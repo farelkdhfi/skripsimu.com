@@ -452,8 +452,11 @@ export function demoteFromToc(
     nodes: (ParaNode | TableNode)[],
     outline: Outline,
     body?: Body,
+    /** Paragraf lampiran beku: tidak diubah (judul, nomor, style) — hanya penanda TC tak tampil. */
+    frozen: Set<ParaNode> = new Set(),
 ): { appendix: number; front: number; shaped: number; regions: VerifyRegion[] } {
     const appx: ParaNode[] = [];
+    let firstFrozen: ParaNode | null = null;
     const out = { appendix: 0, front: 0, shaped: 0, regions: [] as VerifyRegion[] };
     let hasDivider = false;
     const demote = (n: ParaNode, styleId: string) => {
@@ -471,6 +474,7 @@ export function demoteFromToc(
         const role = outline.items[i]?.role;
         if (role === "appendix_heading" && /^\s*lampiran\s*$/i.test(n.text)) { hasDivider = true; return; }
         if (role === "appendix_heading" && !/^\s*(daftar\s+)?lampiran\s*$/i.test(n.text)) {
+            if (frozen.has(n)) { firstFrozen ??= n; return; }
             if (demote(n, "JudulLampiran")) out.appendix++;
             appx.push(n);
         } else if (role === "front_heading" && FRONT_SKIP_RE.test(n.text)) {
@@ -484,7 +488,8 @@ export function demoteFromToc(
         if (merged) before.get(p)!.push(...merged);
     }
     numberAppendixHeadings(appx);
-    if (appx.length && !hasDivider) appx[0].xml = appx[0].xml.replace(/<\/w:p>$/, `${tcRun("LAMPIRAN")}</w:p>`);
+    const firstAppx = appx[0] ?? firstFrozen;
+    if (firstAppx && !hasDivider) firstAppx.xml = firstAppx.xml.replace(/<\/w:p>$/, `${tcRun("LAMPIRAN")}</w:p>`);
 
     for (const p of appx) {
         const b = before.get(p)!;

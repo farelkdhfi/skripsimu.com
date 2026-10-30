@@ -217,6 +217,32 @@ export function alignLegends(
         i = j - 1;
     }
 
+    // Daftar definisi sesudah kalimat pengantar ("Perlakuan yang digunakan …, yaitu:" lalu
+    // "P1 = Tanaman hanjeli 40% …"): ≥ 2 baris "simbol = arti" berurutan, artinya berupa kata
+    // (bukan rumus). Kalimat pengantarnya tidak diubah.
+    for (let i = 0; i < nodes.length; i++) {
+        const lead = okPara(i);
+        if (!lead || rep.ids.has(lead.id) || !/:\s*$/.test(lead.text.trim()) || isEquation(lead)) continue;
+        let j = i + 1;
+        while (j < nodes.length) { const p = okPara(j); if (p && isEmptyParagraph(p)) { j++; continue; } break; }
+        const lines: Line[] = [];
+        for (; j < nodes.length; j++) {
+            const p = okPara(j);
+            if (!p || rep.ids.has(p.id) || isEquation(p)) break;
+            const l = legendLine(p);
+            if (!l) break;
+            const meaning = legendText(l.xml).split(/\t=\t/)[1] ?? "";
+            if (!/[A-Za-z\u00C0-\u024F]{4,}/.test(meaning)) break;
+            lines.push(l);
+        }
+        if (lines.length < 2) continue;
+        layBlock(lines, opts.halfPts, opts.indent, rep.regions, { "w:jc": `<w:jc w:val="both"/>`, "w:spacing": spacing });
+        for (const l of lines) rep.ids.add(l.p.id);
+        rep.blocks++;
+        rep.lines += lines.length;
+        i = j - 1;
+    }
+
     // Hipotesis: "H0 : P1 = P2 = … : Semua perlakuan …" → teks sesudah titik dua kedua sejajar.
     for (let i = 0; i < nodes.length; i++) {
         const group: Line[] = [];

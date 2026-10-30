@@ -507,13 +507,13 @@ export async function transformDocx(
 
     /* -------- daftar isi/tabel/gambar/lampiran -------- */
 
-    realizeCaps(model);
+    realizeCaps(model, frozenParas);
     const columnsMode = config.listStyle === "columns";
     const tocFields = columnsMode
         ? null
         : buildTocFields(model, nodes, outline, { upper: config.chapterUppercase, width: usableWidth });
 
-    const demoted = demoteFromToc(nodes, outline, model.body);
+    const demoted = demoteFromToc(nodes, outline, model.body, frozenParas);
     if (demoted.appendix) notes.push(`${demoted.appendix} judul lampiran hanya dicantumkan di Daftar Lampiran; Daftar Isi cukup memuat LAMPIRAN.`);
     if (demoted.shaped && !freeze.frozen) notes.push(`${demoted.shaped} judul lampiran diseragamkan menjadi "LAMPIRAN n" dan judulnya di baris berikutnya, dengan penomoran berurutan.`);
     if (demoted.front) notes.push(`${demoted.front} judul bagian awal (persetujuan, pengesahan, pernyataan, motto, persembahan) tidak dicantumkan di Daftar Isi. Daftar Isi dimulai dari Kata Pengantar.`);
@@ -740,7 +740,7 @@ export async function transformDocx(
         collapseEmptyPages(model, report, headingIds);
     }
 
-    realizeCaps(model);
+    realizeCaps(model, frozenParas);
     const listCache = refreshListCaches(model, {
         dropTc: new Set([...tableCaps.appendix, ...figureCaps.appendix]),
         figureLabel: figureCaps.label,

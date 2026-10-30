@@ -4,16 +4,17 @@
  * Daftar Isi diperbarui Word, saat di-copy, atau di aplikasi lain.
  */
 import { escapeXml } from "./xml";
-import { flatten, type DocModel } from "./document-model";
+import { flatten, type DocModel, type ParaNode } from "./document-model";
 
 const CAPS_ON = /<w:caps(?:\s+w:val="(?:1|true|on)")?\s*\/>/;
 const decodeXml = (s: string) =>
   s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");
 
-export function realizeCaps(model: DocModel): number {
+export function realizeCaps(model: DocModel, skip: Set<ParaNode> = new Set()): number {
   let count = 0;
   for (const p of flatten(model.body)) {
-    if (p.kind !== "paragraph" || !p.xml.includes("<w:caps")) continue;
+    // Lampiran beku dikembalikan ke teks aslinya; daftar lampiran harus membaca teks asli itu.
+    if (p.kind !== "paragraph" || !p.xml.includes("<w:caps") || skip.has(p)) continue;
     let all = true;
     let changed = false;
     const xml = p.xml.replace(/<w:r(?:\s[^>]*)?>[\s\S]*?<\/w:r>/g, (run) => {
