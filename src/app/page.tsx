@@ -869,7 +869,7 @@ export default function Landing() {
             <div key={t.title}>
               <div className="flex items-center gap-3">
                 <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${t.tag}`}>{t.format}</span>
-                <h3 className="text-lg font-medium text-white">{t.title}</h3>
+                <h3 className="text-lg font-medium text-neutral-50">{t.title}</h3>
               </div>
 
               <ol className="mt-6">
